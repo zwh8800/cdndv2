@@ -157,7 +157,7 @@ type SubAgent interface {
 ```go
 var mainAgentTools = []Tool{
     &CallSubAgentTool{Name: "call_character_agent"},
-    &CallSubAgentTool{Name: "call_combat_agent"},
+    &CallSubAgentTool{Name: "call_subAgentNameCombat},
     &CallSubAgentTool{Name: "call_narrative_agent"},
     &CallSubAgentTool{Name: "call_rules_agent"},
     &CallSubAgentTool{Name: "call_npc_agent"},

@@ -32,7 +32,7 @@ func NewMainAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient, subAgent
 
 // Name 返回Agent名称
 func (m *MainAgent) Name() string {
-	return "main_agent"
+	return MainAgentName
 }
 
 // Description 返回Agent描述

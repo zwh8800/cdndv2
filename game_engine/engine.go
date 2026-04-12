@@ -61,8 +61,12 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}
 
-	// 创建主Agent（初始没有子Agent）
-	mainAgent := agent.NewMainAgent(registry, llmClient, nil)
+	// 注册Agent及其工具
+	registerAgentTools(registry, dndEngine)
+	subAgents := createSubAgents(registry, llmClient)
+
+	// 创建主Agent（包含子Agents）
+	mainAgent := agent.NewMainAgent(registry, llmClient, subAgents)
 
 	// 创建ReAct循环
 	maxIter := cfg.MaxIterations
@@ -73,7 +77,7 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	reactLoop := NewReActLoop(
 		dndEngine,
 		mainAgent,
-		nil, // 子Agent将在后续添加
+		subAgents,
 		registry,
 		llmClient,
 		maxIter,

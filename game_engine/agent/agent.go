@@ -60,13 +60,20 @@ type AgentRequest struct {
 	SubAgentResults map[string]*AgentResponse // 子Agent返回结果
 }
 
+// SubAgentCall 子Agent调用请求
+type SubAgentCall struct {
+	AgentName string `json:"agent_name"` // 子Agent名称，如 "character_agent"
+	Intent    string `json:"intent"`     // 传入子Agent的意图描述
+}
+
 // AgentResponse Agent响应
 type AgentResponse struct {
-	Content     string         `json:"content"`      // 生成的文本内容
-	ToolCalls   []llm.ToolCall `json:"tool_calls"`   // 需要执行的Tool调用
-	NextAction  NextAction     `json:"next_action"`  // 下一步动作
-	StateChange *StateChange   `json:"state_change"` // 状态变更
-	Errors      []AgentError   `json:"errors"`       // 错误信息
+	Content       string         `json:"content"`         // 生成的文本内容
+	ToolCalls     []llm.ToolCall `json:"tool_calls"`      // 需要执行的Tool调用
+	SubAgentCalls []SubAgentCall `json:"sub_agent_calls"` // 需要调用的子Agent
+	NextAction    NextAction     `json:"next_action"`     // 下一步动作
+	StateChange   *StateChange   `json:"state_change"`    // 状态变更
+	Errors        []AgentError   `json:"errors"`          // 错误信息
 }
 
 // NextAction 下一步动作类型

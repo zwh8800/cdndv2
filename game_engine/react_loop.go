@@ -173,6 +173,21 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 
 	// 根据下一步动作决定
 	switch result.NextAction {
+	case agent.ActionCallSubAgent:
+		subAgentResults := l.executeSubAgents(ctx, result.SubAgentCalls)
+		if len(subAgentResults) > 0 {
+			// 将子Agent结果传递给主Agent，让主Agent继续处理
+			l.state.History = append(l.state.History, llm.NewAssistantMessage(
+				fmt.Sprintf("子Agent执行完成，共%d个结果", len(subAgentResults)),
+				nil,
+			))
+			// 将子Agent结果存入上下文，供主Agent下一轮使用
+			if l.state.agentContext != nil {
+				l.state.agentContext.Metadata["sub_agent_results"] = subAgentResults
+			}
+		}
+		return PhaseThink // 主Agent继续思考
+
 	case agent.ActionWaitForInput:
 		return PhaseWait
 	case agent.ActionEndGame:
@@ -182,6 +197,58 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 	default:
 		return PhaseWait
 	}
+}
+
+// executeSubAgents 执行子Agent调用
+func (l *ReActLoop) executeSubAgents(ctx context.Context, calls []agent.SubAgentCall) map[string]*agent.AgentResponse {
+	results := make(map[string]*agent.AgentResponse)
+
+	for _, call := range calls {
+		subAgent, ok := l.agents[call.AgentName]
+		if !ok {
+			results[call.AgentName] = &agent.AgentResponse{
+				Content: "错误: 未找到子Agent " + call.AgentName,
+				Errors:  []agent.AgentError{{Code: "AGENT_NOT_FOUND", Message: "agent not found"}},
+			}
+			continue
+		}
+
+		// 构建子Agent请求
+		req := &agent.AgentRequest{
+			UserInput: call.Intent,
+			Context:   l.state.agentContext,
+		}
+
+		// 执行子Agent
+		resp, err := subAgent.Execute(ctx, req)
+		if err != nil {
+			results[call.AgentName] = &agent.AgentResponse{
+				Content: "错误: 子Agent执行失败: " + err.Error(),
+				Errors:  []agent.AgentError{{Code: "EXECUTION_ERROR", Message: err.Error()}},
+			}
+			continue
+		}
+
+		results[call.AgentName] = resp
+
+		// 将子Agent的输出添加到对话历史
+		if resp.Content != "" {
+			l.state.History = append(l.state.History, llm.NewToolMessage(
+				fmt.Sprintf("[%s] %s", subAgent.Name(), resp.Content),
+				call.AgentName,
+			))
+		}
+
+		// 如果子Agent有Tool调用，也执行它们
+		if len(resp.ToolCalls) > 0 {
+			toolResults := l.executeTools(ctx, resp.ToolCalls)
+			for _, tr := range toolResults {
+				l.state.History = append(l.state.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
+			}
+		}
+	}
+
+	return results
 }
 
 // executeTools 执行Tools

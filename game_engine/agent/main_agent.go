@@ -124,6 +124,15 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 
 	// 处理Tool调用
 	if len(resp.ToolCalls) > 0 {
+		// 检查是否有子Agent调用
+		subAgentCalls := m.extractSubAgentCalls(resp.ToolCalls)
+		if len(subAgentCalls) > 0 {
+			agentResp.SubAgentCalls = subAgentCalls
+			agentResp.NextAction = ActionCallSubAgent
+			return agentResp, nil
+		}
+
+		// 普通Tool调用
 		agentResp.ToolCalls = resp.ToolCalls
 		agentResp.NextAction = ActionContinue
 		return agentResp, nil
@@ -137,6 +146,47 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 	}
 
 	return agentResp, nil
+}
+
+// extractSubAgentCalls 从ToolCalls中提取子Agent调用
+// 当tool name匹配子Agent名称时，将其视为子Agent调用而非普通Tool调用
+func (m *MainAgent) extractSubAgentCalls(toolCalls []llm.ToolCall) []SubAgentCall {
+	var subAgentCalls []SubAgentCall
+
+	for _, call := range toolCalls {
+		// 检查是否匹配已注册的子Agent
+		if _, ok := m.subAgents[call.Name]; ok {
+			// 提取意图：优先使用LLM传入的intent参数，否则使用description或tool name
+			intent := ""
+			if v, ok := call.Arguments["intent"]; ok {
+				if s, ok := v.(string); ok {
+					intent = s
+				}
+			}
+			if intent == "" {
+				if v, ok := call.Arguments["description"]; ok {
+					if s, ok := v.(string); ok {
+						intent = s
+					}
+				}
+			}
+			if intent == "" {
+				intent = call.Name
+			}
+
+			subAgentCalls = append(subAgentCalls, SubAgentCall{
+				AgentName: call.Name,
+				Intent:    intent,
+			})
+		} else {
+			// 非子Agent调用，作为普通Tool调用返回
+			// 注意：如果混合了子Agent和普通Tool，这里简化处理，
+			// 优先处理子Agent，普通Tool在下一轮处理
+			return nil
+		}
+	}
+
+	return subAgentCalls
 }
 
 // prepareTemplateData 准备提示词模板数据

@@ -1,4 +1,4 @@
-module cdnd
+module github.com/zwh8800/cdndv2
 
 go 1.24.2
 

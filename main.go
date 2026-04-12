@@ -10,8 +10,6 @@ import (
 	"github.com/zwh8800/dnd-core/pkg/engine"
 
 	gameengine "github.com/zwh8800/cdndv2/game_engine"
-	"github.com/zwh8800/cdndv2/game_engine/agent"
-	"github.com/zwh8800/cdndv2/game_engine/llm"
 	"github.com/zwh8800/cdndv2/game_engine/llm/openai"
 )
 
@@ -19,22 +17,41 @@ func main() {
 	fmt.Println("=== D&D LLM 游戏引擎 ===")
 	fmt.Println()
 
-	// 创建 Mock LLM 客户端（用于演示）
-	mockClient := openai.NewMockClient([]*llm.CompletionResponse{
-		{
-			Content:      "欢迎来到这个古老的地牢！你站在一条昏暗的走廊入口，空气中弥漫着潮湿的气息。火把在墙壁上摇曳，投下跳跃的影子。你想要做什么？",
-			FinishReason: llm.FinishReasonStop,
-		},
-	})
+	// 从环境变量读取配置
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	if apiKey == "" {
+		fmt.Println("警告: 未设置 OPENAI_API_KEY 环境变量")
+		fmt.Println("请运行: export OPENAI_API_KEY=sk-your-key-here")
+		fmt.Println()
+		fmt.Println("按回车键继续使用占位符密钥（将会失败），或 Ctrl+C 退出")
+		bufio.NewScanner(os.Stdin).Scan()
+		apiKey = "sk-placeholder-key"
+	}
 
-	// 创建游戏引擎（使用假密钥用于演示，实际需要真实 API Key）
+	// 读取模型配置（默认 gpt-4o）
+	model := os.Getenv("OPENAI_MODEL")
+	if model == "" {
+		model = "gpt-4o"
+	}
+
+	// 读取 Base URL（可选，用于代理或兼容 API）
+	baseURL := os.Getenv("OPENAI_BASE_URL")
+
+	// 创建游戏引擎
+	llmConfig := openai.OpenAIConfig{
+		Model:       model,
+		APIKey:      apiKey,
+		Temperature: 0.8,
+		MaxTokens:   2048,
+	}
+	if baseURL != "" {
+		llmConfig.BaseURL = baseURL
+	}
+
 	ge, err := gameengine.NewGameEngine(gameengine.EngineConfig{
 		DNDEngineConfig: engine.DefaultConfig(),
-		LLMConfig: openai.OpenAIConfig{
-			Model:  "gpt-4o",
-			APIKey: "sk-mock-key-for-demo",
-		},
-		MaxIterations: 10,
+		LLMConfig:       llmConfig,
+		MaxIterations:   10,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "创建游戏引擎失败: %v\n", err)
@@ -42,15 +59,13 @@ func main() {
 	}
 	defer ge.Close()
 
-	// 使用 Mock 客户端替换 OpenAI 客户端
-	ge.SetLLMClient(mockClient)
-
-	// 创建并设置主 Agent（使用 Mock 客户端）
-	mainAgent := agent.NewMainAgent(ge.GetRegistry(), mockClient, nil)
-	ge.SetMainAgent(mainAgent)
-
 	fmt.Println("游戏引擎初始化成功！")
-	fmt.Println("提示：当前使用 Mock LLM 客户端，实际使用需要配置 OpenAI API Key")
+	client := ge.GetLLMClient().(*openai.OpenAIClient)
+	config := client.GetConfig()
+	fmt.Printf("使用模型: %s\n", config.Model)
+	if config.BaseURL != "" {
+		fmt.Printf("API 端点: %s\n", config.BaseURL)
+	}
 	fmt.Println()
 
 	// 创建新游戏

@@ -54,15 +54,6 @@ func FormatForLLM(summary *GameSummary) string {
 		}
 	}
 
-	// 可用操作
-	if len(summary.AvailableActions) > 0 {
-		parts = append(parts, "")
-		parts = append(parts, fmt.Sprintf("### 可用操作"))
-		for _, action := range summary.AvailableActions {
-			parts = append(parts, fmt.Sprintf("- %s", action))
-		}
-	}
-
 	return strings.Join(parts, "\n")
 }
 

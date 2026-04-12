@@ -117,11 +117,6 @@ func (l *ReActLoop) observe(ctx context.Context) {
 		summary = state.NewGameSummary(l.state.GameID)
 	}
 
-	// 更新可用操作
-	if summary.Phase != "" {
-		summary.UpdateAvailableActions(summary.Phase)
-	}
-
 	// 构建上下文
 	l.state.agentContext = agent.NewAgentContext(
 		string(l.state.GameID),

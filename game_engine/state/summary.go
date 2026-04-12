@@ -28,9 +28,8 @@ type GameSummary struct {
 	ActiveQuests []QuestSummary `json:"active_quests,omitempty"`
 
 	// 扩展信息
-	PlayerInput      string   `json:"player_input,omitempty"`
-	LastActionResult string   `json:"last_action_result,omitempty"`
-	AvailableActions []string `json:"available_actions,omitempty"`
+	PlayerInput      string `json:"player_input,omitempty"`
+	LastActionResult string `json:"last_action_result,omitempty"`
 }
 
 // SceneSummary 场景摘要
@@ -145,47 +144,6 @@ func CollectSummary(ctx context.Context, e *engine.Engine, gameID model.ID, play
 	return summary, nil
 }
 
-// GetAvailableActions 根据当前 Phase 获取可用操作
-func GetAvailableActions(phase string) []string {
-	switch model.Phase(phase) {
-	case model.PhaseCharacterCreation:
-		return []string{
-			"create_pc - 创建玩家角色",
-			"get_actor - 查看角色信息",
-			"list_actors - 列出所有角色",
-			"add_item - 添加物品",
-			"equip_item - 装备物品",
-		}
-	case model.PhaseExploration:
-		return []string{
-			"create_scene - 创建场景",
-			"get_scene - 查看场景",
-			"move_actor_to_scene - 移动角色",
-			"interact_with_npc - 与NPC互动",
-			"perform_ability_check - 属性检定",
-			"perform_skill_check - 技能检定",
-			"start_combat - 开始战斗",
-			"start_long_rest - 开始长休",
-		}
-	case model.PhaseCombat:
-		return []string{
-			"execute_attack - 执行攻击",
-			"execute_action - 执行动作",
-			"move_actor - 移动角色",
-			"cast_spell - 施放法术",
-			"next_turn - 下一回合",
-			"end_combat - 结束战斗",
-		}
-	case model.PhaseRest:
-		return []string{
-			"short_rest - 短休",
-			"end_long_rest - 结束长休",
-		}
-	default:
-		return []string{}
-	}
-}
-
 // NewGameSummary 创建新的游戏摘要
 func NewGameSummary(gameID model.ID) *GameSummary {
 	return &GameSummary{
@@ -201,11 +159,6 @@ func (s *GameSummary) UpdatePlayerInput(input string) {
 // UpdateLastActionResult 更新上次执行结果
 func (s *GameSummary) UpdateLastActionResult(result string) {
 	s.LastActionResult = result
-}
-
-// UpdateAvailableActions 更新可用操作
-func (s *GameSummary) UpdateAvailableActions(phase string) {
-	s.AvailableActions = GetAvailableActions(phase)
 }
 
 // String 返回摘要的字符串表示

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/zwh8800/dnd-core/pkg/engine"
-	"github.com/zwh8800/dnd-core/pkg/model"
 
 	"github.com/zwh8800/cdndv2/game_engine/llm/openai"
 )
@@ -38,14 +37,8 @@ func TestGameEngineFullFlow(t *testing.T) {
 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
 	}
 
-	dndConfig := engine.Config{
-		RulesPath:      "testdata/rules",
-		CharactersPath: "testdata/characters",
-		ItemsPath:      "testdata/items",
-	}
-
 	gameEngine, err := NewGameEngine(EngineConfig{
-		DNDEngineConfig: dndConfig,
+		DNDEngineConfig: engine.DefaultConfig(),
 		LLMConfig:       llmConfig,
 		MaxIterations:   20,
 	})
@@ -112,14 +105,8 @@ func TestGameEngineCombatFlow(t *testing.T) {
 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
 	}
 
-	dndConfig := engine.Config{
-		RulesPath:      "testdata/rules",
-		CharactersPath: "testdata/characters",
-		ItemsPath:      "testdata/items",
-	}
-
 	gameEngine, err := NewGameEngine(EngineConfig{
-		DNDEngineConfig: dndConfig,
+		DNDEngineConfig: engine.DefaultConfig(),
 		LLMConfig:       llmConfig,
 		MaxIterations:   15,
 	})
@@ -165,14 +152,8 @@ func TestGameEngineExplorationFlow(t *testing.T) {
 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
 	}
 
-	dndConfig := engine.Config{
-		RulesPath:      "testdata/rules",
-		CharactersPath: "testdata/characters",
-		ItemsPath:      "testdata/items",
-	}
-
 	gameEngine, err := NewGameEngine(EngineConfig{
-		DNDEngineConfig: dndConfig,
+		DNDEngineConfig: engine.DefaultConfig(),
 		LLMConfig:       llmConfig,
 		MaxIterations:   15,
 	})
@@ -215,14 +196,8 @@ func TestGameEngineDialogueFlow(t *testing.T) {
 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
 	}
 
-	dndConfig := engine.Config{
-		RulesPath:      "testdata/rules",
-		CharactersPath: "testdata/characters",
-		ItemsPath:      "testdata/items",
-	}
-
 	gameEngine, err := NewGameEngine(EngineConfig{
-		DNDEngineConfig: dndConfig,
+		DNDEngineConfig: engine.DefaultConfig(),
 		LLMConfig:       llmConfig,
 		MaxIterations:   15,
 	})
@@ -266,14 +241,8 @@ func TestGameEngineLoadAndContinue(t *testing.T) {
 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
 	}
 
-	dndConfig := engine.Config{
-		RulesPath:      "testdata/rules",
-		CharactersPath: "testdata/characters",
-		ItemsPath:      "testdata/items",
-	}
-
 	gameEngine, err := NewGameEngine(EngineConfig{
-		DNDEngineConfig: dndConfig,
+		DNDEngineConfig: engine.DefaultConfig(),
 		LLMConfig:       llmConfig,
 		MaxIterations:   10,
 	})
@@ -326,14 +295,8 @@ func TestGameEngineDirectTools(t *testing.T) {
 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
 	}
 
-	dndConfig := engine.Config{
-		RulesPath:      "testdata/rules",
-		CharactersPath: "testdata/characters",
-		ItemsPath:      "testdata/items",
-	}
-
 	gameEngine, err := NewGameEngine(EngineConfig{
-		DNDEngineConfig: dndConfig,
+		DNDEngineConfig: engine.DefaultConfig(),
 		LLMConfig:       llmConfig,
 		MaxIterations:   10,
 	})
@@ -378,19 +341,12 @@ func TestGameEngineInitialization(t *testing.T) {
 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
 	}
 
-	dndConfig := engine.Config{
-		RulesPath:      "testdata/rules",
-		CharactersPath: "testdata/characters",
-		ItemsPath:      "testdata/items",
-	}
-
 	t.Log("Creating game engine with configuration:")
 	t.Logf("  - Model: %s", llmConfig.Model)
 	t.Logf("  - MaxIterations: 20")
-	t.Logf("  - DND Config: RulesPath=%s", dndConfig.RulesPath)
 
 	gameEngine, err := NewGameEngine(EngineConfig{
-		DNDEngineConfig: dndConfig,
+		DNDEngineConfig: engine.DefaultConfig(),
 		LLMConfig:       llmConfig,
 		MaxIterations:   20,
 	})
@@ -432,14 +388,8 @@ func TestGameEngineMultipleSessions(t *testing.T) {
 		t.Skip("OPENAI_API_KEY not set, skipping integration test")
 	}
 
-	dndConfig := engine.Config{
-		RulesPath:      "testdata/rules",
-		CharactersPath: "testdata/characters",
-		ItemsPath:      "testdata/items",
-	}
-
 	gameEngine, err := NewGameEngine(EngineConfig{
-		DNDEngineConfig: dndConfig,
+		DNDEngineConfig: engine.DefaultConfig(),
 		LLMConfig:       llmConfig,
 		MaxIterations:   10,
 	})

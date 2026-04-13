@@ -13,9 +13,8 @@ import (
 
 // CombatAgent 战斗管理Agent
 type CombatAgent struct {
-	registry     *tool.ToolRegistry
-	llm          llm.LLMClient
-	systemPrompt string
+	registry *tool.ToolRegistry
+	llm      llm.LLMClient
 }
 
 // NewCombatAgent 创建战斗管理Agent
@@ -38,10 +37,6 @@ func (a *CombatAgent) Description() string {
 
 // SystemPrompt 返回系统提示词
 func (a *CombatAgent) SystemPrompt(ctx *AgentContext) string {
-	if a.systemPrompt != "" {
-		return a.systemPrompt
-	}
-
 	templateStr, err := prompt.LoadSystemPrompt("combat_system.md")
 	if err != nil {
 		return a.defaultSystemPrompt(ctx)
@@ -53,7 +48,6 @@ func (a *CombatAgent) SystemPrompt(ctx *AgentContext) string {
 		return a.defaultSystemPrompt(ctx)
 	}
 
-	a.systemPrompt = rendered
 	return rendered
 }
 
@@ -162,6 +156,20 @@ func (a *CombatAgent) parseResponse(resp *llm.CompletionResponse) (*AgentRespons
 func (a *CombatAgent) prepareTemplateData(ctx *AgentContext) map[string]any {
 	data := make(map[string]any)
 
+	// 游戏会话ID
+	if ctx.GameID != "" {
+		data["GameID"] = ctx.GameID
+	} else {
+		data["GameID"] = "未设置"
+	}
+
+	// 玩家ID
+	if ctx.PlayerID != "" {
+		data["PlayerID"] = ctx.PlayerID
+	} else {
+		data["PlayerID"] = "未设置"
+	}
+
 	if ctx.CurrentState != nil {
 		data["GameState"] = state.FormatForLLM(ctx.CurrentState)
 	} else {
@@ -187,6 +195,12 @@ func (a *CombatAgent) defaultSystemPrompt(ctx *AgentContext) string {
 
 	parts = append(parts, "你是D&D 5e战斗系统专家。")
 	parts = append(parts, "核心原则：所有战斗操作必须通过调用Tools完成，不得自行计算。")
+
+	// 游戏会话信息
+	parts = append(parts, "")
+	parts = append(parts, fmt.Sprintf("游戏会话ID: %s", ctx.GameID))
+	parts = append(parts, fmt.Sprintf("玩家ID: %s", ctx.PlayerID))
+	parts = append(parts, "重要：在调用任何Tool时，必须使用上述ID来标识当前游戏和玩家。")
 
 	if ctx.CurrentState != nil {
 		parts = append(parts, "")

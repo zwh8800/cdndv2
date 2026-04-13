@@ -13,9 +13,8 @@ import (
 
 // RulesAgent 规则仲裁Agent
 type RulesAgent struct {
-	registry     *tool.ToolRegistry
-	llm          llm.LLMClient
-	systemPrompt string
+	registry *tool.ToolRegistry
+	llm      llm.LLMClient
 }
 
 // NewRulesAgent 创建规则仲裁Agent
@@ -38,10 +37,6 @@ func (a *RulesAgent) Description() string {
 
 // SystemPrompt 返回系统提示词
 func (a *RulesAgent) SystemPrompt(ctx *AgentContext) string {
-	if a.systemPrompt != "" {
-		return a.systemPrompt
-	}
-
 	templateStr, err := prompt.LoadSystemPrompt("rules_system.md")
 	if err != nil {
 		return a.defaultSystemPrompt(ctx)
@@ -53,7 +48,6 @@ func (a *RulesAgent) SystemPrompt(ctx *AgentContext) string {
 		return a.defaultSystemPrompt(ctx)
 	}
 
-	a.systemPrompt = rendered
 	return rendered
 }
 
@@ -163,6 +157,20 @@ func (a *RulesAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse
 func (a *RulesAgent) prepareTemplateData(ctx *AgentContext) map[string]any {
 	data := make(map[string]any)
 
+	// 游戏会话ID
+	if ctx.GameID != "" {
+		data["GameID"] = ctx.GameID
+	} else {
+		data["GameID"] = "未设置"
+	}
+
+	// 玩家ID
+	if ctx.PlayerID != "" {
+		data["PlayerID"] = ctx.PlayerID
+	} else {
+		data["PlayerID"] = "未设置"
+	}
+
 	if ctx.CurrentState != nil {
 		data["GameState"] = state.FormatForLLM(ctx.CurrentState)
 	} else {
@@ -188,6 +196,12 @@ func (a *RulesAgent) defaultSystemPrompt(ctx *AgentContext) string {
 
 	parts = append(parts, "你是D&D 5e规则仲裁专家。")
 	parts = append(parts, "核心原则：所有检定和法术操作必须通过调用Tools完成，不得自行计算。")
+
+	// 游戏会话信息
+	parts = append(parts, "")
+	parts = append(parts, fmt.Sprintf("游戏会话ID: %s", ctx.GameID))
+	parts = append(parts, fmt.Sprintf("玩家ID: %s", ctx.PlayerID))
+	parts = append(parts, "重要：在调用任何Tool时，必须使用上述ID来标识当前游戏和玩家。")
 
 	if ctx.CurrentState != nil {
 		parts = append(parts, "")

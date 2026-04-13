@@ -13,20 +13,17 @@ import (
 
 // MainAgent 主Agent(DM)实现
 type MainAgent struct {
-	registry         *tool.ToolRegistry
-	llm              llm.LLMClient
-	subAgents        map[string]SubAgent
-	systemPrompt     string
-	systemPromptData map[string]any
+	registry  *tool.ToolRegistry
+	llm       llm.LLMClient
+	subAgents map[string]SubAgent
 }
 
 // NewMainAgent 创建主Agent
 func NewMainAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient, subAgents map[string]SubAgent) *MainAgent {
 	return &MainAgent{
-		registry:         registry,
-		llm:              llmClient,
-		subAgents:        subAgents,
-		systemPromptData: make(map[string]any),
+		registry:  registry,
+		llm:       llmClient,
+		subAgents: subAgents,
 	}
 }
 
@@ -42,10 +39,6 @@ func (m *MainAgent) Description() string {
 
 // SystemPrompt 返回系统提示词
 func (m *MainAgent) SystemPrompt(ctx *AgentContext) string {
-	if m.systemPrompt != "" {
-		return m.systemPrompt
-	}
-
 	// 加载提示词模板
 	templateStr, err := prompt.LoadSystemPrompt("main_system.md")
 	if err != nil {
@@ -62,7 +55,6 @@ func (m *MainAgent) SystemPrompt(ctx *AgentContext) string {
 		return m.defaultSystemPrompt(ctx)
 	}
 
-	m.systemPrompt = rendered
 	return rendered
 }
 
@@ -193,6 +185,20 @@ func (m *MainAgent) extractSubAgentCalls(toolCalls []llm.ToolCall) []SubAgentCal
 func (m *MainAgent) prepareTemplateData(ctx *AgentContext) map[string]any {
 	data := make(map[string]any)
 
+	// 游戏会话ID
+	if ctx.GameID != "" {
+		data["GameID"] = ctx.GameID
+	} else {
+		data["GameID"] = "未设置"
+	}
+
+	// 玩家ID
+	if ctx.PlayerID != "" {
+		data["PlayerID"] = ctx.PlayerID
+	} else {
+		data["PlayerID"] = "未设置"
+	}
+
 	// 游戏状态
 	if ctx.CurrentState != nil {
 		data["GameState"] = state.FormatForLLM(ctx.CurrentState)
@@ -230,6 +236,12 @@ func (m *MainAgent) defaultSystemPrompt(ctx *AgentContext) string {
 
 	parts = append(parts, "你是一位经验丰富的地下城主(Dungeon Master)。")
 	parts = append(parts, "核心原则：所有规则判定必须通过调用Tools完成，不得自行计算。")
+
+	// 游戏会话信息
+	parts = append(parts, "")
+	parts = append(parts, fmt.Sprintf("游戏会话ID: %s", ctx.GameID))
+	parts = append(parts, fmt.Sprintf("玩家ID: %s", ctx.PlayerID))
+	parts = append(parts, "重要：在调用任何Tool时，必须使用上述ID来标识当前游戏和玩家。")
 
 	if ctx.CurrentState != nil {
 		parts = append(parts, "")

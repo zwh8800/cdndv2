@@ -130,7 +130,7 @@ func (r *ToolRegistry) GetAllTools() []Tool {
 func (r *ToolRegistry) ExecuteTools(ctx context.Context, calls []llm.ToolCall) []llm.ToolResult {
 	log := r.getLogger()
 
-	log.Info("[ToolRegistry] ExecuteTools started",
+	log.Debug("[ToolRegistry] ExecuteTools started",
 		zap.Int("callCount", len(calls)),
 	)
 
@@ -156,7 +156,7 @@ func (r *ToolRegistry) ExecuteTools(ctx context.Context, calls []llm.ToolCall) [
 		)
 	}
 
-	log.Info("[ToolRegistry] ExecuteTools completed",
+	log.Debug("[ToolRegistry] ExecuteTools completed",
 		zap.Int("totalCalls", len(calls)),
 		zap.Int("errorCount", countErrors(results)),
 	)
@@ -215,8 +215,15 @@ func (r *ToolRegistry) executeTool(ctx context.Context, call llm.ToolCall) llm.T
 	}
 
 	// 格式化结果为字符串
-	content := toolResult.Message
-	if content == "" && toolResult.Data != nil {
+	// 优先使用 Message，但同时包含 Data（如果有）
+	var content string
+	if toolResult.Message != "" && toolResult.Data != nil {
+		// 同时包含消息和数据
+		dataJSON, _ := json.Marshal(toolResult.Data)
+		content = toolResult.Message + "\n" + string(dataJSON)
+	} else if toolResult.Message != "" {
+		content = toolResult.Message
+	} else if toolResult.Data != nil {
 		data, _ := json.Marshal(toolResult.Data)
 		content = string(data)
 	}

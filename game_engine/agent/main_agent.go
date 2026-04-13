@@ -117,11 +117,16 @@ func (m *MainAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentRespo
 		if len(content) > 300 {
 			content = content[:300] + "..."
 		}
+		toolCallNames := make([]string, 0, len(msg.ToolCalls))
+		for _, tc := range msg.ToolCalls {
+			toolCallNames = append(toolCallNames, tc.Name)
+		}
 		log.Debug("[MainAgent] LLM request message",
 			zap.Int("index", i),
 			zap.String("role", roleStr),
 			zap.String("content", content),
 			zap.Int("toolCalls", len(msg.ToolCalls)),
+			zap.Strings("toolNames", toolCallNames),
 		)
 	}
 
@@ -131,7 +136,7 @@ func (m *MainAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentRespo
 		Tools:    tools,
 	}
 
-	log.Info("[MainAgent] Calling LLM",
+	log.Debug("[MainAgent] Calling LLM",
 		zap.Int("messageCount", len(messages)),
 		zap.Int("toolCount", len(tools)),
 	)
@@ -144,7 +149,7 @@ func (m *MainAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentRespo
 		return nil, fmt.Errorf("llm completion failed: %w", err)
 	}
 
-	log.Info("[MainAgent] LLM response received",
+	log.Debug("[MainAgent] LLM response received",
 		zap.String("content", truncateForLog(resp.Content, 300)),
 		zap.Int("toolCalls", len(resp.ToolCalls)),
 		zap.String("finishReason", string(resp.FinishReason)),
@@ -162,7 +167,7 @@ func (m *MainAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentRespo
 		return nil, err
 	}
 
-	log.Info("[MainAgent] Execute completed",
+	log.Debug("[MainAgent] Execute completed",
 		zap.String("nextAction", agentResp.NextAction.String()),
 		zap.String("content", truncateForLog(agentResp.Content, 200)),
 		zap.Int("toolCalls", len(agentResp.ToolCalls)),
@@ -194,9 +199,15 @@ func (m *MainAgent) buildMessages(systemPrompt string, req *AgentRequest) []llm.
 		messages = append(messages, req.Context.History...)
 	}
 
-	// 添加用户输入
+	// 添加用户输入（如果不为空且不是已存在于 history 中的）
+	// 通过 Metadata 中的 pending_user_input 标记判断
 	if req.UserInput != "" {
-		messages = append(messages, llm.NewUserMessage(req.UserInput))
+		pendingInput, _ := req.Context.Metadata["pending_user_input"].(string)
+		if pendingInput != "" && pendingInput != req.UserInput {
+			// 标记的输入与实际不同，才添加（这种情况不应该发生）
+			messages = append(messages, llm.NewUserMessage(req.UserInput))
+		}
+		// 如果 pending_input 与 UserInput 相同，说明是从 history 提取的，不添加
 	}
 
 	return messages
@@ -235,7 +246,7 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 		// 检查是否有子Agent调用
 		subAgentCalls := m.extractSubAgentCalls(resp.ToolCalls)
 		if len(subAgentCalls) > 0 {
-			log.Info("[MainAgent] SubAgent calls extracted",
+			log.Debug("[MainAgent] SubAgent calls extracted",
 				zap.Int("count", len(subAgentCalls)),
 			)
 			for i, sac := range subAgentCalls {
@@ -251,7 +262,7 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 		}
 
 		// 普通Tool调用
-		log.Info("[MainAgent] Regular tool calls",
+		log.Debug("[MainAgent] Regular tool calls",
 			zap.Int("count", len(resp.ToolCalls)),
 		)
 		agentResp.ToolCalls = resp.ToolCalls
@@ -261,12 +272,12 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 
 	// 判断下一步动作
 	if resp.Content != "" {
-		log.Info("[MainAgent] Response content ready for player",
+		log.Debug("[MainAgent] Response content ready for player",
 			zap.String("content", truncateForLog(resp.Content, 200)),
 		)
 		agentResp.NextAction = ActionRespondToPlayer
 	} else {
-		log.Info("[MainAgent] No content, waiting for input")
+		log.Debug("[MainAgent] No content, waiting for input")
 		agentResp.NextAction = ActionWaitForInput
 	}
 

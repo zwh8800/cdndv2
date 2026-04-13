@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/zwh8800/dnd-core/pkg/engine"
 	"github.com/zwh8800/dnd-core/pkg/model"
@@ -323,7 +324,7 @@ func (t *GetPassivePerceptionTool) Execute(ctx context.Context, params map[strin
 		Data: map[string]any{
 			"passive_perception": result.PassivePerception,
 		},
-		Message: "被动感知值: " + string(rune(result.PassivePerception)),
+		Message: fmt.Sprintf("被动感知值: %d", result.PassivePerception),
 	}, nil
 }
 

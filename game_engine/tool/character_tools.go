@@ -2,6 +2,7 @@ package tool
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/zwh8800/dnd-core/pkg/engine"
 	"github.com/zwh8800/dnd-core/pkg/model"
@@ -589,7 +590,7 @@ func (t *ListActorsTool) Execute(ctx context.Context, params map[string]any) (*T
 	return &ToolResult{
 		Success: true,
 		Data:    result.Actors,
-		Message: "找到 " + string(rune(len(result.Actors))) + " 个角色",
+		Message: fmt.Sprintf("找到 %d 个角色", len(result.Actors)),
 	}, nil
 }
 
@@ -787,9 +788,9 @@ func (t *AddExperienceTool) Execute(ctx context.Context, params map[string]any) 
 		}, nil
 	}
 
-	msg := "添加了 " + string(rune(xp)) + " 点经验值"
+	msg := fmt.Sprintf("添加了 %d 点经验值", xp)
 	if result.LeveledUp {
-		msg += "，角色升级到 " + string(rune(result.NewLevel)) + " 级！"
+		msg += fmt.Sprintf("，角色升级到 %d 级！", result.NewLevel)
 	}
 
 	return &ToolResult{

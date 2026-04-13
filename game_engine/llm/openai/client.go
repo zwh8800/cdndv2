@@ -113,7 +113,7 @@ func (c *OpenAIClient) Complete(ctx context.Context, req *llm.CompletionRequest)
 	)
 
 	// 调用 OpenAI API
-	log.Info("[OpenAI] Calling OpenAI API",
+	log.Debug("[OpenAI] Calling OpenAI API",
 		zap.String("model", c.config.Model),
 		zap.String("baseURL", c.config.BaseURL),
 	)
@@ -135,7 +135,7 @@ func (c *OpenAIClient) Complete(ctx context.Context, req *llm.CompletionRequest)
 		return nil, err
 	}
 
-	log.Info("[OpenAI] Response received",
+	log.Debug("[OpenAI] Response received",
 		zap.String("finishReason", string(resp.FinishReason)),
 		zap.String("content", truncateForLog(resp.Content, 200)),
 		zap.Int("toolCalls", len(resp.ToolCalls)),

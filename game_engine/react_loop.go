@@ -96,7 +96,7 @@ func (l *ReActLoop) Run(ctx context.Context, initialInput string, gameID, player
 	l.state.Iteration = 0
 	l.state.CurrentPhase = PhaseObserve
 
-	log.Info("ReAct Loop started",
+	log.Debug("ReAct Loop started",
 		zap.String("gameID", string(gameID)),
 		zap.String("playerID", string(playerID)),
 		zap.String("initialInput", initialInput),
@@ -148,7 +148,7 @@ func (l *ReActLoop) Run(ctx context.Context, initialInput string, gameID, player
 		l.state.Iteration++
 	}
 
-	log.Info("ReAct Loop completed",
+	log.Debug("ReAct Loop completed",
 		zap.Int("totalIterations", l.state.Iteration),
 		zap.Int("historyLength", len(l.state.History)),
 	)
@@ -217,7 +217,8 @@ func (l *ReActLoop) think(ctx context.Context) (*agent.AgentResponse, error) {
 		Context: l.state.agentContext,
 	}
 
-	// 获取最近的玩家输入
+	// 获取最近的玩家输入（从 history 最后一条提取）
+	// 注意：这条消息已经存在于 history 中，不需要再通过 UserInput 添加
 	if len(l.state.History) > 0 {
 		lastMsg := l.state.History[len(l.state.History)-1]
 		if lastMsg.Role == llm.RoleUser {
@@ -226,6 +227,13 @@ func (l *ReActLoop) think(ctx context.Context) (*agent.AgentResponse, error) {
 				zap.String("userInput", lastMsg.Content),
 			)
 		}
+	}
+
+	// UserInput 已从 history 提取，不能再作为新消息添加，否则会重复
+	// 方案：在 agentContext 中标记，避免重复添加
+	if l.state.agentContext != nil {
+		l.state.agentContext.Metadata["pending_user_input"] = req.UserInput
+		req.UserInput = "" // 清空，让 buildMessages 不要重复添加
 	}
 
 	log.Debug("Calling MainAgent.Execute",
@@ -264,7 +272,7 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 
 	// 处理Tool调用
 	if len(result.ToolCalls) > 0 {
-		log.Info("Executing tool calls",
+		log.Debug("Executing tool calls",
 			zap.Int("count", len(result.ToolCalls)),
 		)
 
@@ -278,9 +286,16 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 			)
 		}
 
+		// 先将 assistant 消息（包含 tool_calls）加入历史
+		// OpenAI function calling 格式要求：assistant 消息在前，tool result 消息在后
+		l.state.History = append(l.state.History, llm.NewAssistantMessage("", result.ToolCalls))
+		log.Debug("Assistant tool call message added to history",
+			zap.Int("toolCallCount", len(result.ToolCalls)),
+		)
+
 		toolResults := l.executeTools(ctx, result.ToolCalls)
 
-		// 将结果添加到历史
+		// 将 tool 结果添加到历史
 		for _, tr := range toolResults {
 			l.state.History = append(l.state.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
 			log.Debug("Tool result added to history",
@@ -288,6 +303,11 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 				zap.Bool("isError", tr.IsError),
 				zap.String("content", truncateString(tr.Content, 100)),
 			)
+		}
+
+		// 同步 agentContext.History，确保下一轮 LLM 能看到 tool 结果
+		if l.state.agentContext != nil {
+			l.state.agentContext.History = l.state.History
 		}
 
 		return PhaseThink // 继续思考
@@ -304,7 +324,7 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 	// 根据下一步动作决定
 	switch result.NextAction {
 	case agent.ActionCallSubAgent:
-		log.Info("Action: CallSubAgent",
+		log.Debug("Action: CallSubAgent",
 			zap.Int("subAgentCount", len(result.SubAgentCalls)),
 		)
 		subAgentResults := l.executeSubAgents(ctx, result.SubAgentCalls)
@@ -322,18 +342,18 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 		return PhaseThink // 主Agent继续思考
 
 	case agent.ActionWaitForInput:
-		log.Info("Action: WaitForInput")
+		log.Debug("Action: WaitForInput")
 		return PhaseWait
 	case agent.ActionEndGame:
-		log.Info("Action: EndGame")
+		log.Debug("Action: EndGame")
 		return PhaseEnd
 	case agent.ActionRespondToPlayer:
-		log.Info("Action: RespondToPlayer",
+		log.Debug("Action: RespondToPlayer",
 			zap.String("content", truncateString(result.Content, 200)),
 		)
 		return PhaseWait
 	default:
-		log.Info("Action: default (WaitForInput)")
+		log.Debug("Action: default (WaitForInput)")
 		return PhaseWait
 	}
 }

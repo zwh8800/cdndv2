@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/zwh8800/cdndv2/game_engine/game_summary"
 	"github.com/zwh8800/cdndv2/game_engine/llm"
 	"github.com/zwh8800/cdndv2/game_engine/prompt"
-	"github.com/zwh8800/cdndv2/game_engine/state"
 	"github.com/zwh8800/cdndv2/game_engine/tool"
 )
 
@@ -345,7 +345,7 @@ func (m *MainAgent) prepareTemplateData(ctx *AgentContext) map[string]any {
 
 	// 游戏状态
 	if ctx.CurrentState != nil {
-		data["GameState"] = state.FormatForLLM(ctx.CurrentState)
+		data["GameState"] = game_summary.FormatForLLM(ctx.CurrentState)
 	} else {
 		data["GameState"] = "游戏尚未开始"
 	}
@@ -390,7 +390,7 @@ func (m *MainAgent) defaultSystemPrompt(ctx *AgentContext) string {
 	if ctx.CurrentState != nil {
 		parts = append(parts, "")
 		parts = append(parts, "当前游戏状态:")
-		parts = append(parts, state.FormatForLLM(ctx.CurrentState))
+		parts = append(parts, game_summary.FormatForLLM(ctx.CurrentState))
 	}
 
 	parts = append(parts, "")

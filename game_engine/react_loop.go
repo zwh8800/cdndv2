@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/zwh8800/cdndv2/game_engine/agent"
+	"github.com/zwh8800/cdndv2/game_engine/game_summary"
 	"github.com/zwh8800/cdndv2/game_engine/llm"
-	"github.com/zwh8800/cdndv2/game_engine/state"
 	"github.com/zwh8800/cdndv2/game_engine/tool"
 )
 
@@ -180,13 +180,13 @@ func (l *ReActLoop) observe(ctx context.Context) {
 	log.Debug("Observe phase started")
 
 	// 收集游戏状态
-	summary, err := state.CollectSummary(ctx, l.engine, l.state.GameID, l.state.PlayerID)
+	summary, err := game_summary.CollectSummary(ctx, l.engine, l.state.GameID, l.state.PlayerID)
 	if err != nil {
 		log.Warn("Failed to collect summary, using empty summary",
 			zap.Error(err),
 			zap.String("gameID", string(l.state.GameID)),
 		)
-		summary = state.NewGameSummary(l.state.GameID)
+		summary = game_summary.NewGameSummary(l.state.GameID)
 	}
 
 	log.Debug("Game summary collected",

@@ -1,4 +1,4 @@
-package state
+package game_summary
 
 import (
 	"fmt"

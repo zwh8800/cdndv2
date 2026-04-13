@@ -5,8 +5,8 @@ import (
 
 	"github.com/zwh8800/dnd-core/pkg/engine"
 
+	"github.com/zwh8800/cdndv2/game_engine/game_summary"
 	"github.com/zwh8800/cdndv2/game_engine/llm"
-	"github.com/zwh8800/cdndv2/game_engine/state"
 	"github.com/zwh8800/cdndv2/game_engine/tool"
 )
 
@@ -44,12 +44,12 @@ type SubAgent interface {
 
 // AgentContext Agent执行上下文
 type AgentContext struct {
-	GameID       string             // 游戏会话ID
-	PlayerID     string             // 玩家角色ID
-	Engine       *engine.Engine     // D&D引擎实例
-	History      []llm.Message      // 对话历史
-	CurrentState *state.GameSummary // 当前状态摘要
-	Metadata     map[string]any     // 扩展元数据
+	GameID       string                    // 游戏会话ID
+	PlayerID     string                    // 玩家角色ID
+	Engine       *engine.Engine            // D&D引擎实例
+	History      []llm.Message             // 对话历史
+	CurrentState *game_summary.GameSummary // 当前状态摘要
+	Metadata     map[string]any            // 扩展元数据
 }
 
 // AgentRequest Agent请求

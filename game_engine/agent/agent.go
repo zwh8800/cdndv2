@@ -87,6 +87,24 @@ const (
 	ActionEndGame                           // 结束游戏
 )
 
+// String 返回 NextAction 的字符串表示
+func (a NextAction) String() string {
+	switch a {
+	case ActionContinue:
+		return "Continue"
+	case ActionCallSubAgent:
+		return "CallSubAgent"
+	case ActionRespondToPlayer:
+		return "RespondToPlayer"
+	case ActionWaitForInput:
+		return "WaitForInput"
+	case ActionEndGame:
+		return "EndGame"
+	default:
+		return "Unknown"
+	}
+}
+
 // StateChange 状态变更
 type StateChange struct {
 	Type    string `json:"type"`

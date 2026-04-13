@@ -3,9 +3,12 @@ package gameengine
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/zwh8800/dnd-core/pkg/engine"
 	"github.com/zwh8800/dnd-core/pkg/model"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/zwh8800/cdndv2/game_engine/agent"
 	"github.com/zwh8800/cdndv2/game_engine/llm"
@@ -26,6 +29,10 @@ type EngineConfig struct {
 
 	// OpenAI API密钥（如果LLMConfig中没有设置）
 	OpenAIAPIKey string
+
+	// 日志级别 (debug, info, warn, error)，默认为 info
+	// 可以通过环境变量 LOG_LEVEL 覆盖
+	LogLevel string
 }
 
 // GameEngine 游戏引擎
@@ -36,10 +43,27 @@ type GameEngine struct {
 	mainAgent *agent.MainAgent
 	llmClient llm.LLMClient
 	config    EngineConfig
+	logger    *zap.Logger
 }
 
 // NewGameEngine 创建新的游戏引擎
 func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
+	// 初始化日志器
+	logLevel := cfg.LogLevel
+	if logLevel == "" {
+		logLevel = "info" // 默认 info 级别
+	}
+	logger, err := initLogger(logLevel)
+	if err != nil {
+		// 如果初始化失败，使用 Nop logger
+		logger = zap.NewNop()
+	}
+
+	logger.Info("Initializing GameEngine",
+		zap.String("logLevel", logLevel),
+		zap.Int("maxIterations", cfg.MaxIterations),
+	)
+
 	// 创建D&D引擎
 	dndEngine, err := engine.New(cfg.DNDEngineConfig)
 	if err != nil {
@@ -48,6 +72,7 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 
 	// 创建Tool注册中心
 	registry := tool.NewToolRegistry()
+	registry.SetLogger(logger)
 
 	// 创建LLM客户端
 	var llmClient llm.LLMClient
@@ -61,12 +86,18 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)
 	}
 
+	// 设置日志器
+	if openAIClient, ok := llmClient.(*openai.OpenAIClient); ok {
+		openAIClient.SetLogger(logger)
+	}
+
 	// 注册Agent及其工具
 	registerAgentTools(registry, dndEngine)
 	subAgents := createSubAgents(registry, llmClient)
 
 	// 创建主Agent（包含子Agents）
 	mainAgent := agent.NewMainAgent(registry, llmClient, subAgents)
+	mainAgent.SetLogger(logger)
 
 	// 创建ReAct循环
 	maxIter := cfg.MaxIterations
@@ -82,6 +113,7 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 		llmClient,
 		maxIter,
 	)
+	reactLoop.SetLogger(logger)
 
 	return &GameEngine{
 		dndEngine: dndEngine,
@@ -90,7 +122,31 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 		mainAgent: mainAgent,
 		llmClient: llmClient,
 		config:    cfg,
+		logger:    logger,
 	}, nil
+}
+
+// initLogger 初始化 zap 日志器
+func initLogger(level string) (*zap.Logger, error) {
+	lvl := zapcore.InfoLevel
+	if level != "" {
+		if err := lvl.UnmarshalText([]byte(level)); err != nil {
+			lvl = zapcore.InfoLevel
+		}
+	}
+
+	encoderConfig := zap.NewProductionEncoderConfig()
+	encoderConfig.TimeKey = "time"
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
+
+	core := zapcore.NewCore(
+		zapcore.NewConsoleEncoder(encoderConfig),
+		zapcore.AddSync(os.Stdout),
+		lvl,
+	)
+
+	return zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1)), nil
 }
 
 // GetDNDEngine 获取D&D引擎实例

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
+	"go.uber.org/zap"
+
 	"github.com/zwh8800/cdndv2/game_engine/llm"
 )
 
@@ -12,6 +14,22 @@ type ToolRegistry struct {
 	tools    map[string]Tool
 	byAgent  map[string][]string // agent -> tool names
 	category map[string][]string // category -> tool names
+	logger   *zap.Logger
+}
+
+// SetLogger 设置日志器
+func (r *ToolRegistry) SetLogger(log *zap.Logger) {
+	if log != nil {
+		r.logger = log
+	}
+}
+
+// getLogger 获取日志器
+func (r *ToolRegistry) getLogger() *zap.Logger {
+	if r.logger == nil {
+		r.logger = zap.NewNop()
+	}
+	return r.logger
 }
 
 // NewToolRegistry 创建新的Tool注册中心
@@ -110,14 +128,62 @@ func (r *ToolRegistry) GetAllTools() []Tool {
 
 // ExecuteTools 执行多个Tool调用
 func (r *ToolRegistry) ExecuteTools(ctx context.Context, calls []llm.ToolCall) []llm.ToolResult {
+	log := r.getLogger()
+
+	log.Info("[ToolRegistry] ExecuteTools started",
+		zap.Int("callCount", len(calls)),
+	)
+
 	results := make([]llm.ToolResult, 0, len(calls))
 
-	for _, call := range calls {
+	for i, call := range calls {
+		argsJSON, _ := json.Marshal(call.Arguments)
+		log.Debug("[ToolRegistry] Executing tool",
+			zap.Int("index", i),
+			zap.String("toolName", call.Name),
+			zap.String("toolCallID", call.ID),
+			zap.String("arguments", truncateForLog(string(argsJSON), 200)),
+		)
+
 		result := r.executeTool(ctx, call)
 		results = append(results, result)
+
+		log.Debug("[ToolRegistry] Tool executed",
+			zap.String("toolName", call.Name),
+			zap.String("toolCallID", call.ID),
+			zap.Bool("isError", result.IsError),
+			zap.String("content", truncateForLog(result.Content, 200)),
+		)
 	}
 
+	log.Info("[ToolRegistry] ExecuteTools completed",
+		zap.Int("totalCalls", len(calls)),
+		zap.Int("errorCount", countErrors(results)),
+	)
+
 	return results
+}
+
+// truncateForLog 截断日志字符串
+func truncateForLog(s string, maxLen int) string {
+	if s == "" {
+		return s
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// countErrors 统计错误数量
+func countErrors(results []llm.ToolResult) int {
+	count := 0
+	for _, r := range results {
+		if r.IsError {
+			count++
+		}
+	}
+	return count
 }
 
 // executeTool 执行单个Tool调用

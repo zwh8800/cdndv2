@@ -41,6 +41,7 @@ func TestGameEngineFullFlow(t *testing.T) {
 		DNDEngineConfig: engine.DefaultConfig(),
 		LLMConfig:       llmConfig,
 		MaxIterations:   20,
+		LogLevel:        "debug",
 	})
 	if err != nil {
 		t.Fatalf("Failed to create game engine: %v", err)

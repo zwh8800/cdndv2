@@ -2,8 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/zwh8800/cdndv2/game_engine/llm"
 	"github.com/zwh8800/cdndv2/game_engine/prompt"
@@ -16,6 +19,7 @@ type MainAgent struct {
 	registry  *tool.ToolRegistry
 	llm       llm.LLMClient
 	subAgents map[string]SubAgent
+	logger    *zap.Logger
 }
 
 // NewMainAgent 创建主Agent
@@ -24,7 +28,23 @@ func NewMainAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient, subAgent
 		registry:  registry,
 		llm:       llmClient,
 		subAgents: subAgents,
+		logger:    zap.NewNop(),
 	}
+}
+
+// SetLogger 设置日志器
+func (m *MainAgent) SetLogger(log *zap.Logger) {
+	if log != nil {
+		m.logger = log
+	}
+}
+
+// getLogger 获取日志器
+func (m *MainAgent) getLogger() *zap.Logger {
+	if m.logger == nil {
+		m.logger = zap.NewNop()
+	}
+	return m.logger
 }
 
 // Name 返回Agent名称
@@ -65,14 +85,45 @@ func (m *MainAgent) Tools() []tool.Tool {
 
 // Execute 执行Agent逻辑
 func (m *MainAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentResponse, error) {
+	log := m.getLogger()
+
+	log.Debug("[MainAgent] Execute started",
+		zap.String("userInput", req.UserInput),
+		zap.Int("historyLength", len(req.Context.History)),
+	)
+
 	// 构建系统提示词
 	systemPrompt := m.SystemPrompt(req.Context)
+	log.Debug("[MainAgent] System prompt built",
+		zap.Int("promptLength", len(systemPrompt)),
+	)
 
 	// 组装消息
 	messages := m.buildMessages(systemPrompt, req)
+	log.Debug("[MainAgent] Messages built",
+		zap.Int("messageCount", len(messages)),
+	)
 
 	// 获取Tools定义
 	tools := m.registry.GetAll()
+	log.Debug("[MainAgent] Tools retrieved",
+		zap.Int("toolCount", len(tools)),
+	)
+
+	// 打印发送给LLM的消息
+	for i, msg := range messages {
+		roleStr := string(msg.Role)
+		content := msg.Content
+		if len(content) > 300 {
+			content = content[:300] + "..."
+		}
+		log.Debug("[MainAgent] LLM request message",
+			zap.Int("index", i),
+			zap.String("role", roleStr),
+			zap.String("content", content),
+			zap.Int("toolCalls", len(msg.ToolCalls)),
+		)
+	}
 
 	// 调用LLM
 	llmReq := &llm.CompletionRequest{
@@ -80,13 +131,56 @@ func (m *MainAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentRespo
 		Tools:    tools,
 	}
 
+	log.Info("[MainAgent] Calling LLM",
+		zap.Int("messageCount", len(messages)),
+		zap.Int("toolCount", len(tools)),
+	)
+
 	resp, err := m.llm.Complete(ctx, llmReq)
 	if err != nil {
+		log.Error("[MainAgent] LLM completion failed",
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("llm completion failed: %w", err)
 	}
 
+	log.Info("[MainAgent] LLM response received",
+		zap.String("content", truncateForLog(resp.Content, 300)),
+		zap.Int("toolCalls", len(resp.ToolCalls)),
+		zap.String("finishReason", string(resp.FinishReason)),
+		zap.Int("promptTokens", resp.Usage.PromptTokens),
+		zap.Int("completionTokens", resp.Usage.CompletionTokens),
+		zap.Int("totalTokens", resp.Usage.TotalTokens),
+	)
+
 	// 解析响应
-	return m.parseResponse(resp)
+	agentResp, err := m.parseResponse(resp)
+	if err != nil {
+		log.Error("[MainAgent] parseResponse failed",
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
+	log.Info("[MainAgent] Execute completed",
+		zap.String("nextAction", agentResp.NextAction.String()),
+		zap.String("content", truncateForLog(agentResp.Content, 200)),
+		zap.Int("toolCalls", len(agentResp.ToolCalls)),
+		zap.Int("subAgentCalls", len(agentResp.SubAgentCalls)),
+	)
+
+	return agentResp, nil
+}
+
+// truncateForLog 截断日志字符串
+func truncateForLog(s string, maxLen int) string {
+	if len(s) == 0 {
+		return s
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // buildMessages 构建消息列表
@@ -110,21 +204,56 @@ func (m *MainAgent) buildMessages(systemPrompt string, req *AgentRequest) []llm.
 
 // parseResponse 解析LLM响应
 func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse, error) {
+	log := m.getLogger()
+
+	log.Debug("[MainAgent] parseResponse started",
+		zap.String("content", truncateForLog(resp.Content, 200)),
+		zap.Int("toolCalls", len(resp.ToolCalls)),
+	)
+
 	agentResp := &AgentResponse{
 		Content: resp.Content,
 	}
 
 	// 处理Tool调用
 	if len(resp.ToolCalls) > 0 {
+		log.Debug("[MainAgent] Tool calls detected",
+			zap.Int("count", len(resp.ToolCalls)),
+		)
+
+		// 打印每个tool call
+		for i, tc := range resp.ToolCalls {
+			argsJSON, _ := json.Marshal(tc.Arguments)
+			log.Debug("[MainAgent] Tool call",
+				zap.Int("index", i),
+				zap.String("toolName", tc.Name),
+				zap.String("toolCallID", tc.ID),
+				zap.String("arguments", truncateForLog(string(argsJSON), 200)),
+			)
+		}
+
 		// 检查是否有子Agent调用
 		subAgentCalls := m.extractSubAgentCalls(resp.ToolCalls)
 		if len(subAgentCalls) > 0 {
+			log.Info("[MainAgent] SubAgent calls extracted",
+				zap.Int("count", len(subAgentCalls)),
+			)
+			for i, sac := range subAgentCalls {
+				log.Debug("[MainAgent] SubAgent call",
+					zap.Int("index", i),
+					zap.String("agentName", sac.AgentName),
+					zap.String("intent", truncateForLog(sac.Intent, 100)),
+				)
+			}
 			agentResp.SubAgentCalls = subAgentCalls
 			agentResp.NextAction = ActionCallSubAgent
 			return agentResp, nil
 		}
 
 		// 普通Tool调用
+		log.Info("[MainAgent] Regular tool calls",
+			zap.Int("count", len(resp.ToolCalls)),
+		)
 		agentResp.ToolCalls = resp.ToolCalls
 		agentResp.NextAction = ActionContinue
 		return agentResp, nil
@@ -132,8 +261,12 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 
 	// 判断下一步动作
 	if resp.Content != "" {
+		log.Info("[MainAgent] Response content ready for player",
+			zap.String("content", truncateForLog(resp.Content, 200)),
+		)
 		agentResp.NextAction = ActionRespondToPlayer
 	} else {
+		log.Info("[MainAgent] No content, waiting for input")
 		agentResp.NextAction = ActionWaitForInput
 	}
 

@@ -7,6 +7,7 @@ import (
 
 	openai "github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"go.uber.org/zap"
 
 	"github.com/zwh8800/cdndv2/game_engine/llm"
 )
@@ -19,6 +20,22 @@ var (
 type OpenAIClient struct {
 	client openai.Client
 	config OpenAIConfig
+	logger *zap.Logger
+}
+
+// SetLogger 设置日志器
+func (c *OpenAIClient) SetLogger(log *zap.Logger) {
+	if log != nil {
+		c.logger = log
+	}
+}
+
+// getLogger 获取日志器
+func (c *OpenAIClient) getLogger() *zap.Logger {
+	if c.logger == nil {
+		c.logger = zap.NewNop()
+	}
+	return c.logger
 }
 
 // NewOpenAIClient 创建OpenAI客户端
@@ -45,6 +62,15 @@ func NewOpenAIClient(config OpenAIConfig) (*OpenAIClient, error) {
 
 // Complete 执行非流式完成请求
 func (c *OpenAIClient) Complete(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
+	log := c.getLogger()
+
+	log.Debug("[OpenAI] Complete called",
+		zap.Int("messageCount", len(req.Messages)),
+		zap.Int("toolCount", len(req.Tools)),
+		zap.Float64("temperature", req.Temperature),
+		zap.Int("maxTokens", req.MaxTokens),
+	)
+
 	// 构建消息
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0, len(req.Messages))
 	for _, msg := range req.Messages {
@@ -79,14 +105,68 @@ func (c *OpenAIClient) Complete(ctx context.Context, req *llm.CompletionRequest)
 		params.Tools = tools
 	}
 
+	// 打印请求详情（debug级别）
+	log.Debug("[OpenAI] Request details",
+		zap.String("model", c.config.Model),
+		zap.Int("messages", len(messages)),
+		zap.Int("tools", len(tools)),
+	)
+
 	// 调用 OpenAI API
+	log.Info("[OpenAI] Calling OpenAI API",
+		zap.String("model", c.config.Model),
+		zap.String("baseURL", c.config.BaseURL),
+	)
+
 	completion, err := c.client.Chat.Completions.New(ctx, params)
 	if err != nil {
+		log.Error("[OpenAI] API call failed",
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("openai chat completion failed: %w", err)
 	}
 
 	// 解析响应
-	return c.parseCompletionResponse(completion)
+	resp, err := c.parseCompletionResponse(completion)
+	if err != nil {
+		log.Error("[OpenAI] Parse response failed",
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
+	log.Info("[OpenAI] Response received",
+		zap.String("finishReason", string(resp.FinishReason)),
+		zap.String("content", truncateForLog(resp.Content, 200)),
+		zap.Int("toolCalls", len(resp.ToolCalls)),
+		zap.Int("promptTokens", resp.Usage.PromptTokens),
+		zap.Int("completionTokens", resp.Usage.CompletionTokens),
+		zap.Int("totalTokens", resp.Usage.TotalTokens),
+	)
+
+	// 详细打印tool calls
+	for i, tc := range resp.ToolCalls {
+		argsJSON, _ := json.Marshal(tc.Arguments)
+		log.Debug("[OpenAI] Tool call",
+			zap.Int("index", i),
+			zap.String("toolName", tc.Name),
+			zap.String("toolCallID", tc.ID),
+			zap.String("arguments", truncateForLog(string(argsJSON), 300)),
+		)
+	}
+
+	return resp, nil
+}
+
+// truncateForLog 截断日志字符串
+func truncateForLog(s string, maxLen int) string {
+	if s == "" {
+		return s
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // Stream 执行流式完成请求

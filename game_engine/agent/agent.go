@@ -50,6 +50,11 @@ type AgentContext struct {
 	History      []llm.Message             // 对话历史
 	CurrentState *game_summary.GameSummary // 当前状态摘要
 	Metadata     map[string]any            // 扩展元数据
+
+	// SubAgent 执行相关
+	AgentResults map[string]*AgentCallResult // SubAgent 执行结果
+	Parent       *AgentContext               // 父会话引用（SubAgent隔离用）
+	IsSubSession bool                        // 是否为子会话
 }
 
 // AgentRequest Agent请求
@@ -60,7 +65,40 @@ type AgentRequest struct {
 	SubAgentResults map[string]*AgentResponse // 子Agent返回结果
 }
 
-// SubAgentCall 子Agent调用请求
+// AgentCallResult Agent 执行结果
+type AgentCallResult struct {
+	AgentName string         `json:"agent_name"`
+	Success   bool           `json:"success"`
+	Content   string         `json:"content"`
+	ToolCalls []llm.ToolCall `json:"tool_calls,omitempty"`
+	State     map[string]any `json:"state,omitempty"`
+	Error     string         `json:"error,omitempty"`
+}
+
+// ExecutionMode 执行模式
+type ExecutionMode string
+
+const (
+	ExecutionSequential ExecutionMode = "sequential"
+	ExecutionParallel   ExecutionMode = "parallel"
+)
+
+// AgentDelegation 单个Agent委托请求
+type AgentDelegation struct {
+	AgentName string `json:"agent_name"`
+	Intent    string `json:"intent"`
+	Input     string `json:"input,omitempty"`
+}
+
+// RouterDecision 路由决策
+type RouterDecision struct {
+	TargetAgents   []AgentDelegation `json:"target_agents"`
+	ExecutionMode  ExecutionMode     `json:"execution_mode"`
+	Reasoning      string            `json:"reasoning"`
+	DirectResponse string            `json:"direct_response,omitempty"` // 无需Agent时的直接回复
+}
+
+// SubAgentCall 子Agent调用请求（已废弃，保留兼容，使用 AgentDelegation 替代）
 type SubAgentCall struct {
 	AgentName string `json:"agent_name"` // 子Agent名称，如 "character_agent"
 	Intent    string `json:"intent"`     // 传入子Agent的意图描述
@@ -81,7 +119,8 @@ type NextAction int
 
 const (
 	ActionContinue        NextAction = iota // 继续思考
-	ActionCallSubAgent                      // 调用子Agent
+	ActionDelegate                          // 委托给SubAgent
+	ActionSynthesize                        // 合成结果
 	ActionRespondToPlayer                   // 响应玩家
 	ActionWaitForInput                      // 等待玩家输入
 	ActionEndGame                           // 结束游戏
@@ -92,8 +131,10 @@ func (a NextAction) String() string {
 	switch a {
 	case ActionContinue:
 		return "Continue"
-	case ActionCallSubAgent:
-		return "CallSubAgent"
+	case ActionDelegate:
+		return "Delegate"
+	case ActionSynthesize:
+		return "Synthesize"
 	case ActionRespondToPlayer:
 		return "RespondToPlayer"
 	case ActionWaitForInput:
@@ -142,4 +183,35 @@ func (c *AgentContext) GetMetadata(key string) (any, bool) {
 // SetMetadata 设置元数据
 func (c *AgentContext) SetMetadata(key string, value any) {
 	c.Metadata[key] = value
+}
+
+// AddAgentResult 添加 SubAgent 执行结果
+func (c *AgentContext) AddAgentResult(result *AgentCallResult) {
+	if c.AgentResults == nil {
+		c.AgentResults = make(map[string]*AgentCallResult)
+	}
+	c.AgentResults[result.AgentName] = result
+}
+
+// GetAgentResult 获取特定 SubAgent 的结果
+func (c *AgentContext) GetAgentResult(agentName string) *AgentCallResult {
+	if c.AgentResults == nil {
+		return nil
+	}
+	return c.AgentResults[agentName]
+}
+
+// GetAllAgentResults 获取所有 SubAgent 结果
+func (c *AgentContext) GetAllAgentResults() map[string]*AgentCallResult {
+	return c.AgentResults
+}
+
+// HasAgentResults 检查是否有 SubAgent 结果
+func (c *AgentContext) HasAgentResults() bool {
+	return c.AgentResults != nil && len(c.AgentResults) > 0
+}
+
+// ClearAgentResults 清除 SubAgent 结果
+func (c *AgentContext) ClearAgentResults() {
+	c.AgentResults = nil
 }

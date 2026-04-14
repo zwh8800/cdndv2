@@ -1,6 +1,6 @@
 module github.com/zwh8800/cdndv2
 
-go 1.24.2
+go 1.25.0
 
 replace github.com/zwh8800/dnd-core => ../dnd-core
 
@@ -17,4 +17,5 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 )

@@ -95,8 +95,12 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	registerAgentTools(registry, dndEngine)
 	subAgents := createSubAgents(registry, llmClient)
 
-	// 创建主Agent（包含子Agents）
-	mainAgent := agent.NewMainAgent(registry, llmClient, subAgents)
+	// 创建路由Agent
+	router := createRouter(llmClient, subAgents)
+	router.SetLogger(logger)
+
+	// 创建主Agent
+	mainAgent := agent.NewMainAgent(registry, llmClient)
 	mainAgent.SetLogger(logger)
 
 	// 创建ReAct循环
@@ -108,6 +112,7 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	reactLoop := NewReActLoop(
 		dndEngine,
 		mainAgent,
+		router,
 		subAgents,
 		registry,
 		llmClient,

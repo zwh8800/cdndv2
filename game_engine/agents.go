@@ -9,6 +9,9 @@ import (
 
 // registerAgentTools 注册主/子Agent所需工具
 func registerAgentTools(registry *tool.ToolRegistry, engine *engine.Engine) {
+	// 注册委托任务工具（MainAgent专用，用于委托SubAgent）
+	registry.Register(tool.NewDelegateTaskTool(), []string{agent.MainAgentName}, "delegation")
+
 	// 注册角色管理工具 (10)
 	registry.Register(tool.NewCreatePCTool(engine), []string{agent.SubAgentNameCharacter, agent.MainAgentName}, "character")
 	registry.Register(tool.NewCreateNPCTool(engine), []string{agent.SubAgentNameCharacter, agent.MainAgentName}, "character")
@@ -60,4 +63,9 @@ func createSubAgents(registry *tool.ToolRegistry, llmClient llm.LLMClient) map[s
 		agent.SubAgentNameCombat:    agent.NewCombatAgent(registry, llmClient),
 		agent.SubAgentNameRules:     agent.NewRulesAgent(registry, llmClient),
 	}
+}
+
+// createRouter 创建路由Agent
+func createRouter(llmClient llm.LLMClient, agents map[string]agent.SubAgent) *agent.RouterAgent {
+	return agent.NewRouterAgent(llmClient, agents)
 }

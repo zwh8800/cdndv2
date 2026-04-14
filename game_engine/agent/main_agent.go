@@ -16,19 +16,17 @@ import (
 
 // MainAgent 主Agent(DM)实现
 type MainAgent struct {
-	registry  *tool.ToolRegistry
-	llm       llm.LLMClient
-	subAgents map[string]SubAgent
-	logger    *zap.Logger
+	registry *tool.ToolRegistry
+	llm      llm.LLMClient
+	logger   *zap.Logger
 }
 
 // NewMainAgent 创建主Agent
-func NewMainAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient, subAgents map[string]SubAgent) *MainAgent {
+func NewMainAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *MainAgent {
 	return &MainAgent{
-		registry:  registry,
-		llm:       llmClient,
-		subAgents: subAgents,
-		logger:    zap.NewNop(),
+		registry: registry,
+		llm:      llmClient,
+		logger:   zap.NewNop(),
 	}
 }
 
@@ -243,21 +241,17 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 			)
 		}
 
-		// 检查是否有子Agent调用
-		subAgentCalls := m.extractSubAgentCalls(resp.ToolCalls)
-		if len(subAgentCalls) > 0 {
-			log.Debug("[MainAgent] SubAgent calls extracted",
-				zap.Int("count", len(subAgentCalls)),
+		// 检查是否有 delegate_task 调用
+		delegateCalls, regularCalls := m.separateDelegateCalls(resp.ToolCalls)
+		if len(delegateCalls) > 0 {
+			log.Debug("[MainAgent] Delegate task calls detected",
+				zap.Int("count", len(delegateCalls)),
 			)
-			for i, sac := range subAgentCalls {
-				log.Debug("[MainAgent] SubAgent call",
-					zap.Int("index", i),
-					zap.String("agentName", sac.AgentName),
-					zap.String("intent", truncateForLog(sac.Intent, 100)),
-				)
-			}
-			agentResp.SubAgentCalls = subAgentCalls
-			agentResp.NextAction = ActionCallSubAgent
+			// 将 delegate_task 调用转换为 SubAgentCall
+			agentResp.SubAgentCalls = m.convertToSubAgentCalls(delegateCalls)
+			// 如果同时有普通工具调用，也保留
+			agentResp.ToolCalls = regularCalls
+			agentResp.NextAction = ActionDelegate
 			return agentResp, nil
 		}
 
@@ -284,45 +278,31 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 	return agentResp, nil
 }
 
-// extractSubAgentCalls 从ToolCalls中提取子Agent调用
-// 当tool name匹配子Agent名称时，将其视为子Agent调用而非普通Tool调用
-func (m *MainAgent) extractSubAgentCalls(toolCalls []llm.ToolCall) []SubAgentCall {
-	var subAgentCalls []SubAgentCall
-
+// separateDelegateCalls 将 delegate_task 调用与其他工具调用分离
+func (m *MainAgent) separateDelegateCalls(toolCalls []llm.ToolCall) (delegateCalls, regularCalls []llm.ToolCall) {
 	for _, call := range toolCalls {
-		// 检查是否匹配已注册的子Agent
-		if _, ok := m.subAgents[call.Name]; ok {
-			// 提取意图：优先使用LLM传入的intent参数，否则使用description或tool name
-			intent := ""
-			if v, ok := call.Arguments["intent"]; ok {
-				if s, ok := v.(string); ok {
-					intent = s
-				}
-			}
-			if intent == "" {
-				if v, ok := call.Arguments["description"]; ok {
-					if s, ok := v.(string); ok {
-						intent = s
-					}
-				}
-			}
-			if intent == "" {
-				intent = call.Name
-			}
-
-			subAgentCalls = append(subAgentCalls, SubAgentCall{
-				AgentName: call.Name,
-				Intent:    intent,
-			})
+		if tool.IsDelegateTaskTool(call.Name) {
+			delegateCalls = append(delegateCalls, call)
 		} else {
-			// 非子Agent调用，作为普通Tool调用返回
-			// 注意：如果混合了子Agent和普通Tool，这里简化处理，
-			// 优先处理子Agent，普通Tool在下一轮处理
-			return nil
+			regularCalls = append(regularCalls, call)
 		}
 	}
+	return
+}
 
-	return subAgentCalls
+// convertToSubAgentCalls 将 delegate_task 工具调用转换为 SubAgentCall
+func (m *MainAgent) convertToSubAgentCalls(delegateCalls []llm.ToolCall) []SubAgentCall {
+	var calls []SubAgentCall
+	for _, call := range delegateCalls {
+		agentName, intent, _ := tool.ExtractDelegation(call.Arguments)
+		if agentName != "" && intent != "" {
+			calls = append(calls, SubAgentCall{
+				AgentName: agentName,
+				Intent:    intent,
+			})
+		}
+	}
+	return calls
 }
 
 // prepareTemplateData 准备提示词模板数据
@@ -360,16 +340,6 @@ func (m *MainAgent) prepareTemplateData(ctx *AgentContext) map[string]any {
 		})
 	}
 	data["AvailableTools"] = toolInfo
-
-	// 可用子Agent
-	subAgentInfo := make([]map[string]string, 0, len(m.subAgents))
-	for _, agent := range m.subAgents {
-		subAgentInfo = append(subAgentInfo, map[string]string{
-			"Name":        agent.Name(),
-			"Description": agent.Description(),
-		})
-	}
-	data["SubAgents"] = subAgentInfo
 
 	return data
 }

@@ -3,10 +3,12 @@ package gameengine
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/zwh8800/dnd-core/pkg/engine"
 	"github.com/zwh8800/dnd-core/pkg/model"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/zwh8800/cdndv2/game_engine/agent"
 	"github.com/zwh8800/cdndv2/game_engine/game_summary"
@@ -19,8 +21,10 @@ type Phase int
 
 const (
 	PhaseObserve Phase = iota
+	PhaseRoute
 	PhaseThink
 	PhaseAct
+	PhaseSynthesize
 	PhaseWait
 	PhaseEnd
 )
@@ -40,11 +44,13 @@ type LoopState struct {
 type ReActLoop struct {
 	engine    *engine.Engine
 	mainAgent agent.Agent
+	router    *agent.RouterAgent
 	agents    map[string]agent.SubAgent
 	tools     *tool.ToolRegistry
 	llm       llm.LLMClient
 	state     *LoopState
 	maxIter   int
+	useRouter bool
 	logger    *zap.Logger
 }
 
@@ -60,6 +66,7 @@ func (l *ReActLoop) getLogger() *zap.Logger {
 func NewReActLoop(
 	e *engine.Engine,
 	mainAgent agent.Agent,
+	router *agent.RouterAgent,
 	agents map[string]agent.SubAgent,
 	tools *tool.ToolRegistry,
 	llmClient llm.LLMClient,
@@ -68,10 +75,12 @@ func NewReActLoop(
 	return &ReActLoop{
 		engine:    e,
 		mainAgent: mainAgent,
+		router:    router,
 		agents:    agents,
 		tools:     tools,
 		llm:       llmClient,
 		maxIter:   maxIter,
+		useRouter: router != nil,
 		state: &LoopState{
 			CurrentPhase: PhaseObserve,
 			History:      make([]llm.Message, 0),
@@ -121,6 +130,9 @@ func (l *ReActLoop) Run(ctx context.Context, initialInput string, gameID, player
 		case PhaseObserve:
 			l.observe(ctx)
 
+		case PhaseRoute:
+			l.route(ctx)
+
 		case PhaseThink:
 			response, err := l.think(ctx)
 			if err != nil {
@@ -136,6 +148,9 @@ func (l *ReActLoop) Run(ctx context.Context, initialInput string, gameID, player
 		case PhaseAct:
 			nextPhase := l.act(ctx)
 			l.state.CurrentPhase = nextPhase
+
+		case PhaseSynthesize:
+			l.synthesize(ctx)
 
 		case PhaseWait:
 			// 等待玩家输入（由外部处理）
@@ -161,10 +176,14 @@ func (l *ReActLoop) phaseName(phase Phase) string {
 	switch phase {
 	case PhaseObserve:
 		return "Observe"
+	case PhaseRoute:
+		return "Route"
 	case PhaseThink:
 		return "Think"
 	case PhaseAct:
 		return "Act"
+	case PhaseSynthesize:
+		return "Synthesize"
 	case PhaseWait:
 		return "Wait"
 	case PhaseEnd:
@@ -203,9 +222,94 @@ func (l *ReActLoop) observe(ctx context.Context) {
 	l.state.agentContext.History = l.state.History
 	l.state.agentContext.CurrentState = summary
 
-	// 转入思考阶段
+	// 如果启用了Router，转入路由阶段；否则直接转入思考阶段
+	if l.useRouter {
+		l.state.CurrentPhase = PhaseRoute
+		log.Debug("Transitioning to Route phase")
+	} else {
+		l.state.CurrentPhase = PhaseThink
+		log.Debug("Transitioning to Think phase")
+	}
+}
+
+// route 路由阶段
+func (l *ReActLoop) route(ctx context.Context) {
+	log := l.getLogger()
+	log.Debug("Route phase started")
+
+	// 获取用户输入
+	var userInput string
+	if len(l.state.History) > 0 {
+		lastMsg := l.state.History[len(l.state.History)-1]
+		if lastMsg.Role == llm.RoleUser {
+			userInput = lastMsg.Content
+		}
+	}
+
+	// 调用RouterAgent进行路由决策
+	decision, err := l.router.Route(ctx, userInput, l.state.History, l.state.agentContext.CurrentState)
+	if err != nil {
+		log.Error("Router failed, falling back to Think phase",
+			zap.Error(err),
+		)
+		l.state.CurrentPhase = PhaseThink
+		return
+	}
+
+	log.Debug("Router decision",
+		zap.Int("targetAgentCount", len(decision.TargetAgents)),
+		zap.String("executionMode", string(decision.ExecutionMode)),
+		zap.String("reasoning", decision.Reasoning),
+	)
+
+	// 如果有直接响应，跳转到Think阶段让MainAgent处理
+	if decision.DirectResponse != "" && len(decision.TargetAgents) == 0 {
+		log.Debug("Router decided direct response, going to Think phase")
+		l.state.CurrentPhase = PhaseThink
+		return
+	}
+
+	// 如果有目标Agent，执行委托
+	if len(decision.TargetAgents) > 0 {
+		// 转换为SubAgentCall格式
+		calls := make([]agent.SubAgentCall, 0, len(decision.TargetAgents))
+		for _, t := range decision.TargetAgents {
+			calls = append(calls, agent.SubAgentCall{
+				AgentName: t.AgentName,
+				Intent:    t.Intent,
+			})
+		}
+
+		// 执行委托（根据决策中的执行模式）
+		results := l.executeDelegations(ctx, calls)
+
+		// 将结果存入上下文
+		if l.state.agentContext != nil {
+			for _, res := range results {
+				l.state.agentContext.AddAgentResult(res)
+			}
+		}
+
+		// 生成结果摘要添加到历史
+		var resultSummaries []string
+		for agentName, res := range results {
+			if res.Success {
+				resultSummaries = append(resultSummaries, fmt.Sprintf("[%s] %s", agentName, res.Content))
+			} else {
+				resultSummaries = append(resultSummaries, fmt.Sprintf("[%s] 错误: %s", agentName, res.Error))
+			}
+		}
+		if len(resultSummaries) > 0 {
+			l.state.History = append(l.state.History, llm.NewAssistantMessage(
+				fmt.Sprintf("委托任务执行完成:\n%s", joinStrings(resultSummaries, "\n")),
+				nil,
+			))
+		}
+	}
+
+	// 转入Think阶段，让MainAgent处理结果或生成叙事
 	l.state.CurrentPhase = PhaseThink
-	log.Debug("Transitioning to Think phase")
+	log.Debug("Transitioning to Think phase after routing")
 }
 
 // think 思考阶段
@@ -323,23 +427,39 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 
 	// 根据下一步动作决定
 	switch result.NextAction {
-	case agent.ActionCallSubAgent:
-		log.Debug("Action: CallSubAgent",
-			zap.Int("subAgentCount", len(result.SubAgentCalls)),
+	case agent.ActionDelegate:
+		log.Debug("Action: Delegate",
+			zap.Int("delegationCount", len(result.SubAgentCalls)),
+			zap.Int("regularToolCount", len(result.ToolCalls)),
 		)
-		subAgentResults := l.executeSubAgents(ctx, result.SubAgentCalls)
-		if len(subAgentResults) > 0 {
-			// 将子Agent结果传递给主Agent，让主Agent继续处理
+		// 执行委托任务
+		delegationResults := l.executeDelegations(ctx, result.SubAgentCalls)
+		if len(delegationResults) > 0 {
+			// 将委托结果存入上下文，供主Agent下一轮使用
+			if l.state.agentContext != nil {
+				for _, res := range delegationResults {
+					l.state.agentContext.AddAgentResult(res)
+				}
+			}
+			// 生成结果摘要添加到历史
+			var resultSummaries []string
+			for agentName, res := range delegationResults {
+				if res.Success {
+					resultSummaries = append(resultSummaries, fmt.Sprintf("[%s] %s", agentName, res.Content))
+				} else {
+					resultSummaries = append(resultSummaries, fmt.Sprintf("[%s] 错误: %s", agentName, res.Error))
+				}
+			}
 			l.state.History = append(l.state.History, llm.NewAssistantMessage(
-				fmt.Sprintf("子Agent执行完成，共%d个结果", len(subAgentResults)),
+				fmt.Sprintf("委托任务执行完成:\n%s", joinStrings(resultSummaries, "\n")),
 				nil,
 			))
-			// 将子Agent结果存入上下文，供主Agent下一轮使用
-			if l.state.agentContext != nil {
-				l.state.agentContext.Metadata["sub_agent_results"] = subAgentResults
-			}
 		}
 		return PhaseThink // 主Agent继续思考
+
+	case agent.ActionSynthesize:
+		log.Debug("Action: Synthesize")
+		return PhaseSynthesize
 
 	case agent.ActionWaitForInput:
 		log.Debug("Action: WaitForInput")
@@ -358,56 +478,189 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 	}
 }
 
-// executeSubAgents 执行子Agent调用
-func (l *ReActLoop) executeSubAgents(ctx context.Context, calls []agent.SubAgentCall) map[string]*agent.AgentResponse {
-	results := make(map[string]*agent.AgentResponse)
+// executeDelegations 执行委托任务（调用SubAgent）
+// 根据依赖分析决定串行或并行执行
+func (l *ReActLoop) executeDelegations(ctx context.Context, calls []agent.SubAgentCall) map[string]*agent.AgentCallResult {
+	if len(calls) == 0 {
+		return nil
+	}
 
+	// 分析依赖关系，决定执行模式
+	execMode := l.analyzeDependencies(calls)
+	l.getLogger().Debug("Delegation execution mode",
+		zap.String("mode", string(execMode)),
+		zap.Int("callCount", len(calls)),
+	)
+
+	if execMode == agent.ExecutionParallel && len(calls) > 1 {
+		return l.executeDelegationsParallel(ctx, calls)
+	}
+	return l.executeDelegationsSequential(ctx, calls)
+}
+
+// analyzeDependencies 分析委托任务的依赖关系
+func (l *ReActLoop) analyzeDependencies(calls []agent.SubAgentCall) agent.ExecutionMode {
+	// 如果只有一个委托，无需并行
+	if len(calls) <= 1 {
+		return agent.ExecutionSequential
+	}
+
+	// 收集所有目标Agent
+	agentSet := make(map[string]bool)
+	for _, call := range calls {
+		agentSet[call.AgentName] = true
+	}
+
+	// 检查依赖关系
+	// CombatAgent 依赖 CharacterAgent
+	// 同一Agent的多个委托需要串行（状态冲突风险）
 	for _, call := range calls {
 		subAgent, ok := l.agents[call.AgentName]
 		if !ok {
-			results[call.AgentName] = &agent.AgentResponse{
-				Content: "错误: 未找到子Agent " + call.AgentName,
-				Errors:  []agent.AgentError{{Code: "AGENT_NOT_FOUND", Message: "agent not found"}},
-			}
 			continue
 		}
-
-		// 构建子Agent请求
-		req := &agent.AgentRequest{
-			UserInput: call.Intent,
-			Context:   l.state.agentContext,
-		}
-
-		// 执行子Agent
-		resp, err := subAgent.Execute(ctx, req)
-		if err != nil {
-			results[call.AgentName] = &agent.AgentResponse{
-				Content: "错误: 子Agent执行失败: " + err.Error(),
-				Errors:  []agent.AgentError{{Code: "EXECUTION_ERROR", Message: err.Error()}},
-			}
-			continue
-		}
-
-		results[call.AgentName] = resp
-
-		// 将子Agent的输出添加到对话历史
-		if resp.Content != "" {
-			l.state.History = append(l.state.History, llm.NewToolMessage(
-				fmt.Sprintf("[%s] %s", subAgent.Name(), resp.Content),
-				call.AgentName,
-			))
-		}
-
-		// 如果子Agent有Tool调用，也执行它们
-		if len(resp.ToolCalls) > 0 {
-			toolResults := l.executeTools(ctx, resp.ToolCalls)
-			for _, tr := range toolResults {
-				l.state.History = append(l.state.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
+		// 检查是否有依赖
+		deps := subAgent.Dependencies()
+		for _, dep := range deps {
+			if agentSet[dep] {
+				// 存在依赖，需要串行执行
+				return agent.ExecutionSequential
 			}
 		}
 	}
 
+	// 检查是否有重复的Agent调用（同一Agent多次调用需串行）
+	agentCount := make(map[string]int)
+	for _, call := range calls {
+		agentCount[call.AgentName]++
+		if agentCount[call.AgentName] > 1 {
+			return agent.ExecutionSequential
+		}
+	}
+
+	// 无依赖且无重复，可以并行
+	return agent.ExecutionParallel
+}
+
+// executeDelegationsSequential 串行执行委托任务
+func (l *ReActLoop) executeDelegationsSequential(ctx context.Context, calls []agent.SubAgentCall) map[string]*agent.AgentCallResult {
+	results := make(map[string]*agent.AgentCallResult)
+
+	for _, call := range calls {
+		result := l.executeSingleDelegation(ctx, call)
+		results[call.AgentName] = result
+	}
+
 	return results
+}
+
+// executeDelegationsParallel 并行执行委托任务
+func (l *ReActLoop) executeDelegationsParallel(ctx context.Context, calls []agent.SubAgentCall) map[string]*agent.AgentCallResult {
+	results := make(map[string]*agent.AgentCallResult, len(calls))
+	var mu sync.Mutex
+
+	eg, ctx := errgroup.WithContext(ctx)
+
+	for _, call := range calls {
+		call := call // 闭包捕获
+		eg.Go(func() error {
+			result := l.executeSingleDelegation(ctx, call)
+			mu.Lock()
+			results[call.AgentName] = result
+			mu.Unlock()
+			return nil
+		})
+	}
+
+	if err := eg.Wait(); err != nil {
+		l.getLogger().Error("Parallel delegation execution error", zap.Error(err))
+	}
+
+	return results
+}
+
+// executeSingleDelegation 执行单个委托任务
+func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubAgentCall) *agent.AgentCallResult {
+	subAgent, ok := l.agents[call.AgentName]
+	if !ok {
+		return &agent.AgentCallResult{
+			AgentName: call.AgentName,
+			Success:   false,
+			Error:     "未找到子Agent: " + call.AgentName,
+		}
+	}
+
+	// 创建隔离的子会话上下文
+	subCtx := l.createSubSession(l.state.agentContext)
+
+	// 构建子Agent请求
+	req := &agent.AgentRequest{
+		UserInput: call.Intent,
+		Context:   subCtx,
+	}
+
+	// 执行子Agent
+	resp, err := subAgent.Execute(ctx, req)
+	if err != nil {
+		return &agent.AgentCallResult{
+			AgentName: call.AgentName,
+			Success:   false,
+			Error:     "子Agent执行失败: " + err.Error(),
+		}
+	}
+
+	// 如果子Agent有Tool调用，在子会话中执行它们
+	if len(resp.ToolCalls) > 0 {
+		l.executeSubAgentTools(ctx, subCtx, resp.ToolCalls)
+	}
+
+	return &agent.AgentCallResult{
+		AgentName: call.AgentName,
+		Success:   true,
+		Content:   resp.Content,
+		ToolCalls: resp.ToolCalls,
+	}
+}
+
+// createSubSession 创建隔离的子会话上下文
+func (l *ReActLoop) createSubSession(parentCtx *agent.AgentContext) *agent.AgentContext {
+	if parentCtx == nil {
+		return agent.NewAgentContext("", "", l.engine)
+	}
+	return &agent.AgentContext{
+		GameID:       parentCtx.GameID,
+		PlayerID:     parentCtx.PlayerID,
+		Engine:       parentCtx.Engine,
+		History:      make([]llm.Message, 0), // 独立历史
+		CurrentState: parentCtx.CurrentState, // 共享游戏状态（只读）
+		Metadata:     make(map[string]any),
+		Parent:       parentCtx, // 链接父会话
+		IsSubSession: true,
+	}
+}
+
+// executeSubAgentTools 在子会话中执行SubAgent的工具调用
+func (l *ReActLoop) executeSubAgentTools(ctx context.Context, subCtx *agent.AgentContext, toolCalls []llm.ToolCall) {
+	toolResults := l.tools.ExecuteTools(ctx, toolCalls)
+	// 将工具结果追加到子会话历史，不污染父会话
+	for _, tr := range toolResults {
+		subCtx.History = append(subCtx.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
+	}
+}
+
+// joinStrings 连接字符串切片
+func joinStrings(strs []string, sep string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+	result := ""
+	for i, s := range strs {
+		if i > 0 {
+			result += sep
+		}
+		result += s
+	}
+	return result
 }
 
 // executeTools 执行Tools
@@ -452,4 +705,95 @@ func formatArgs(args map[string]any) string {
 		return s[:200] + "..."
 	}
 	return s
+}
+
+// synthesize 合成阶段 - 将多个Agent的执行结果整合为连贯叙事
+func (l *ReActLoop) synthesize(ctx context.Context) {
+	log := l.getLogger()
+	log.Debug("Synthesize phase started")
+
+	// 检查是否有Agent结果需要合成
+	if l.state.agentContext == nil || !l.state.agentContext.HasAgentResults() {
+		log.Debug("No agent results to synthesize, transitioning to Think phase")
+		l.state.CurrentPhase = PhaseThink
+		return
+	}
+
+	// 获取用户输入
+	var userInput string
+	if len(l.state.History) > 0 {
+		lastMsg := l.state.History[len(l.state.History)-1]
+		if lastMsg.Role == llm.RoleUser {
+			userInput = lastMsg.Content
+		}
+	}
+
+	// 构建Agent结果摘要
+	var resultSummaries []string
+	agentResults := l.state.agentContext.GetAllAgentResults()
+	for _, res := range agentResults {
+		if res.Success {
+			resultSummaries = append(resultSummaries, fmt.Sprintf("[%s] %s", res.AgentName, res.Content))
+		} else {
+			resultSummaries = append(resultSummaries, fmt.Sprintf("[%s] 错误: %s", res.AgentName, res.Error))
+		}
+	}
+
+	// 构建合成请求
+	synthesisPrompt := l.buildSynthesisPrompt(userInput, joinStrings(resultSummaries, "\n"))
+
+	// 调用LLM进行合成
+	messages := []llm.Message{
+		llm.NewSystemMessage(synthesisPrompt),
+		llm.NewUserMessage("请合成以上Agent的执行结果，输出流畅的叙事描述。"),
+	}
+
+	req := &llm.CompletionRequest{
+		Messages: messages,
+	}
+	resp, err := l.llm.Complete(ctx, req)
+	if err != nil {
+		log.Error("Synthesis LLM call failed", zap.Error(err))
+		// 失败时使用简单拼接
+		l.state.History = append(l.state.History, llm.NewAssistantMessage(
+			fmt.Sprintf("委托任务执行完成:\n%s", joinStrings(resultSummaries, "\n")),
+			nil,
+		))
+	} else {
+		// 将合成结果添加到历史
+		l.state.History = append(l.state.History, llm.NewAssistantMessage(resp.Content, nil))
+		log.Debug("Synthesis completed",
+			zap.String("content", truncateString(resp.Content, 200)),
+		)
+	}
+
+	// 清空Agent结果，准备下一轮
+	l.state.agentContext.ClearAgentResults()
+
+	// 转入等待阶段
+	l.state.CurrentPhase = PhaseWait
+}
+
+// buildSynthesisPrompt 构建合成提示词
+func (l *ReActLoop) buildSynthesisPrompt(userInput, agentResults string) string {
+	// 使用简化的合成提示词
+	return fmt.Sprintf(`你是一个结果合成专家，负责将多个专业Agent的执行结果整合为一个连贯的叙事输出。
+
+## 输入信息
+
+**玩家请求**：
+%s
+
+**Agent执行结果**：
+%s
+
+## 输出要求
+
+1. 将多个Agent的输出整合为流畅的叙事，避免机械拼接
+2. 保持D&D游戏风格，以DM（地下城主）的口吻描述
+3. 强调重要的游戏事件（伤害、技能检定、状态变化）
+4. 保留关键数值的准确性
+5. 输出一段完整的叙事段落
+
+请直接输出合成后的叙事，不要添加额外说明：`, userInput, agentResults)
 }

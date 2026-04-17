@@ -76,9 +76,13 @@ func (m *MainAgent) SystemPrompt(ctx *AgentContext) string {
 	return rendered
 }
 
-// Tools 返回Agent可用的Tools
+// Tools 返回Agent可用的Tools（只读工具 + delegate_task）
 func (m *MainAgent) Tools() []tool.Tool {
-	return m.registry.GetAllTools()
+	readOnlyTools := m.registry.GetReadOnlyTools()
+	if dt, ok := m.registry.Get(tool.DelegateTaskToolName); ok {
+		readOnlyTools = append(readOnlyTools, dt)
+	}
+	return readOnlyTools
 }
 
 // Execute 执行Agent逻辑
@@ -102,8 +106,18 @@ func (m *MainAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentRespo
 		zap.Int("messageCount", len(messages)),
 	)
 
-	// 获取Tools定义
-	tools := m.registry.GetAll()
+	// 获取Tools定义 - 只暴露只读工具和 delegate_task
+	tools := m.registry.GetReadOnlySchemas()
+	if dt, ok := m.registry.Get(tool.DelegateTaskToolName); ok {
+		tools = append(tools, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        dt.Name(),
+				"description": dt.Description(),
+				"parameters":  dt.ParametersSchema(),
+			},
+		})
+	}
 	log.Debug("[MainAgent] Tools retrieved",
 		zap.Int("toolCount", len(tools)),
 	)
@@ -241,25 +255,44 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 			)
 		}
 
-		// 检查是否有 delegate_task 调用
-		delegateCalls, regularCalls := m.separateDelegateCalls(resp.ToolCalls)
+		// 分类工具调用：delegate_task、只读工具、写操作工具
+		delegateCalls, readOnlyCalls, writeCalls := m.separateCallsByAccess(resp.ToolCalls)
+
+		// 写操作调用转为 delegate_task（防御性拦截）
+		if len(writeCalls) > 0 {
+			log.Warn("LLM attempted to call write tools directly, converting to delegate_task",
+				zap.Int("writeCallCount", len(writeCalls)),
+			)
+			for _, wc := range writeCalls {
+				agentName := m.inferAgentForTool(wc.Name)
+				delegateCalls = append(delegateCalls, llm.ToolCall{
+					ID:   wc.ID,
+					Name: tool.DelegateTaskToolName,
+					Arguments: map[string]any{
+						"agent_name": agentName,
+						"intent":     fmt.Sprintf("执行 %s 操作", wc.Name),
+					},
+				})
+			}
+		}
+
+		// 处理 delegate_task 调用
 		if len(delegateCalls) > 0 {
 			log.Debug("[MainAgent] Delegate task calls detected",
 				zap.Int("count", len(delegateCalls)),
 			)
-			// 将 delegate_task 调用转换为 SubAgentCall
 			agentResp.SubAgentCalls = m.convertToSubAgentCalls(delegateCalls)
-			// 如果同时有普通工具调用，也保留
-			agentResp.ToolCalls = regularCalls
+			// 只读工具调用也保留，和委托并行执行
+			agentResp.ToolCalls = readOnlyCalls
 			agentResp.NextAction = ActionDelegate
 			return agentResp, nil
 		}
 
-		// 普通Tool调用
-		log.Debug("[MainAgent] Regular tool calls",
-			zap.Int("count", len(resp.ToolCalls)),
+		// 只有只读工具调用
+		log.Debug("[MainAgent] Read-only tool calls",
+			zap.Int("count", len(readOnlyCalls)),
 		)
-		agentResp.ToolCalls = resp.ToolCalls
+		agentResp.ToolCalls = readOnlyCalls
 		agentResp.NextAction = ActionContinue
 		return agentResp, nil
 	}
@@ -278,13 +311,23 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 	return agentResp, nil
 }
 
-// separateDelegateCalls 将 delegate_task 调用与其他工具调用分离
-func (m *MainAgent) separateDelegateCalls(toolCalls []llm.ToolCall) (delegateCalls, regularCalls []llm.ToolCall) {
+// separateCallsByAccess 将工具调用分为三类：delegate_task、只读工具、写操作工具
+func (m *MainAgent) separateCallsByAccess(toolCalls []llm.ToolCall) (delegateCalls, readOnlyCalls, writeCalls []llm.ToolCall) {
 	for _, call := range toolCalls {
 		if tool.IsDelegateTaskTool(call.Name) {
 			delegateCalls = append(delegateCalls, call)
+			continue
+		}
+		t, ok := m.registry.Get(call.Name)
+		if !ok {
+			// 未知工具，保留原样让 ToolRegistry 返回错误
+			readOnlyCalls = append(readOnlyCalls, call)
+			continue
+		}
+		if t.ReadOnly() {
+			readOnlyCalls = append(readOnlyCalls, call)
 		} else {
-			regularCalls = append(regularCalls, call)
+			writeCalls = append(writeCalls, call)
 		}
 	}
 	return
@@ -303,6 +346,20 @@ func (m *MainAgent) convertToSubAgentCalls(delegateCalls []llm.ToolCall) []SubAg
 		}
 	}
 	return calls
+}
+
+// inferAgentForTool 根据工具名推断应该委托给哪个 Agent
+func (m *MainAgent) inferAgentForTool(toolName string) string {
+	// 查询 registry 中的 byAgent 映射
+	agents := m.registry.GetAgentsForTool(toolName)
+	// 优先返回非 MainAgent 的 Agent
+	for _, a := range agents {
+		if a != MainAgentName {
+			return a
+		}
+	}
+	// 默认委托给 rules_agent
+	return SubAgentNameRules
 }
 
 // prepareTemplateData 准备提示词模板数据
@@ -330,16 +387,17 @@ func (m *MainAgent) prepareTemplateData(ctx *AgentContext) map[string]any {
 		data["GameState"] = "游戏尚未开始"
 	}
 
-	// 可用Tools
-	tools := m.registry.GetAllTools()
-	toolInfo := make([]map[string]string, 0, len(tools))
-	for _, t := range tools {
+	// 只读工具信息（MainAgent 可直接调用）
+	readOnlyTools := m.registry.GetReadOnlyTools()
+	toolInfo := make([]map[string]string, 0, len(readOnlyTools))
+	for _, t := range readOnlyTools {
 		toolInfo = append(toolInfo, map[string]string{
 			"Name":        t.Name(),
 			"Description": t.Description(),
 		})
 	}
-	data["AvailableTools"] = toolInfo
+	data["ReadOnlyTools"] = toolInfo
+	data["AvailableTools"] = toolInfo // 兼容旧模板
 
 	return data
 }
@@ -364,10 +422,12 @@ func (m *MainAgent) defaultSystemPrompt(ctx *AgentContext) string {
 	}
 
 	parts = append(parts, "")
-	parts = append(parts, "可用Tools:")
-	for _, t := range m.registry.GetAllTools() {
+	parts = append(parts, "可用Tools（只读查询）:")
+	for _, t := range m.registry.GetReadOnlyTools() {
 		parts = append(parts, fmt.Sprintf("- `%s`: %s", t.Name(), t.Description()))
 	}
+	parts = append(parts, "")
+	parts = append(parts, "对于修改游戏状态的操作（创建角色、战斗、施法等），请使用 delegate_task 委托给专业 Agent。")
 
 	return strings.Join(parts, "\n")
 }

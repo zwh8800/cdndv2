@@ -17,6 +17,9 @@ type Tool interface {
 
 	// Execute 执行Tool
 	Execute(ctx context.Context, params map[string]any) (*ToolResult, error)
+
+	// ReadOnly 返回是否为只读工具（不修改游戏状态）
+	ReadOnly() bool
 }
 
 // ToolResult Tool执行结果
@@ -33,6 +36,7 @@ type BaseTool struct {
 	name        string
 	description string
 	schema      map[string]any
+	readOnly    bool
 }
 
 func (t *BaseTool) Name() string {
@@ -47,18 +51,24 @@ func (t *BaseTool) ParametersSchema() map[string]any {
 	return t.schema
 }
 
+// ReadOnly 返回是否为只读工具（默认 false）
+func (t *BaseTool) ReadOnly() bool {
+	return t.readOnly
+}
+
 // EngineTool 引擎Tool基类
 type EngineTool struct {
 	BaseTool
 	engine any // *engine.Engine，使用any避免循环依赖
 }
 
-func NewEngineTool(name, description string, schema map[string]any, engine any) *EngineTool {
+func NewEngineTool(name, description string, schema map[string]any, engine any, readOnly bool) *EngineTool {
 	return &EngineTool{
 		BaseTool: BaseTool{
 			name:        name,
 			description: description,
 			schema:      schema,
+			readOnly:    readOnly,
 		},
 		engine: engine,
 	}

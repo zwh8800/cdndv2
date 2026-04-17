@@ -38,6 +38,7 @@ func NewStartCombatTool(e *engine.Engine) *StartCombatTool {
 				"required": []string{"game_id", "scene_id", "participant_ids"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -110,6 +111,7 @@ func NewStartCombatWithSurpriseTool(e *engine.Engine) *StartCombatWithSurpriseTo
 				"required": []string{"game_id", "scene_id", "stealthy_side", "observers"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -175,6 +177,7 @@ func NewGetCurrentCombatTool(e *engine.Engine) *GetCurrentCombatTool {
 				"required": []string{"game_id"},
 			},
 			e,
+			true,
 		),
 	}
 }
@@ -224,6 +227,7 @@ func NewGetCurrentTurnTool(e *engine.Engine) *GetCurrentTurnTool {
 				"required": []string{"game_id"},
 			},
 			e,
+			true,
 		),
 	}
 }
@@ -273,6 +277,7 @@ func NewNextTurnTool(e *engine.Engine) *NextTurnTool {
 				"required": []string{"game_id"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -330,6 +335,7 @@ func NewExecuteActionTool(e *engine.Engine) *ExecuteActionTool {
 				"required": []string{"game_id", "actor_id", "action_type"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -410,6 +416,7 @@ func NewExecuteAttackTool(e *engine.Engine) *ExecuteAttackTool {
 				"required": []string{"game_id", "attacker_id", "target_id"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -497,6 +504,7 @@ func NewMoveActorTool(e *engine.Engine) *MoveActorTool {
 				"required": []string{"game_id", "actor_id", "x", "y"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -566,6 +574,7 @@ func NewExecuteDamageTool(e *engine.Engine) *ExecuteDamageTool {
 				"required": []string{"game_id", "target_id", "amount"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -635,6 +644,7 @@ func NewExecuteHealingTool(e *engine.Engine) *ExecuteHealingTool {
 				"required": []string{"game_id", "target_id", "amount"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -692,6 +702,7 @@ func NewPerformDeathSaveTool(e *engine.Engine) *PerformDeathSaveTool {
 				"required": []string{"game_id", "actor_id"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -752,6 +763,7 @@ func NewEndCombatTool(e *engine.Engine) *EndCombatTool {
 				"required": []string{"game_id"},
 			},
 			e,
+			false,
 		),
 	}
 }

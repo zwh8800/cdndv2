@@ -126,6 +126,49 @@ func (r *ToolRegistry) GetAllTools() []Tool {
 	return tools
 }
 
+// GetReadOnlyTools 获取所有只读工具
+func (r *ToolRegistry) GetReadOnlyTools() []Tool {
+	var tools []Tool
+	for _, t := range r.tools {
+		if t.ReadOnly() {
+			tools = append(tools, t)
+		}
+	}
+	return tools
+}
+
+// GetReadOnlySchemas 获取只读工具的 LLM 函数调用格式 Schema
+func (r *ToolRegistry) GetReadOnlySchemas() []map[string]any {
+	schemas := make([]map[string]any, 0)
+	for _, t := range r.tools {
+		if t.ReadOnly() {
+			schemas = append(schemas, map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name":        t.Name(),
+					"description": t.Description(),
+					"parameters":  t.ParametersSchema(),
+				},
+			})
+		}
+	}
+	return schemas
+}
+
+// GetAgentsForTool 获取工具所属的Agent列表
+func (r *ToolRegistry) GetAgentsForTool(toolName string) []string {
+	var agents []string
+	for agent, tools := range r.byAgent {
+		for _, t := range tools {
+			if t == toolName {
+				agents = append(agents, agent)
+				break
+			}
+		}
+	}
+	return agents
+}
+
 // ExecuteTools 执行多个Tool调用
 func (r *ToolRegistry) ExecuteTools(ctx context.Context, calls []llm.ToolCall) []llm.ToolResult {
 	log := r.getLogger()

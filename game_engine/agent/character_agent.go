@@ -2,8 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/zwh8800/cdndv2/game_engine/game_summary"
 	"github.com/zwh8800/cdndv2/game_engine/llm"
@@ -15,6 +18,7 @@ import (
 type CharacterAgent struct {
 	registry *tool.ToolRegistry
 	llm      llm.LLMClient
+	logger   *zap.Logger
 }
 
 // NewCharacterAgent 创建角色管理Agent
@@ -22,7 +26,23 @@ func NewCharacterAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *Ch
 	return &CharacterAgent{
 		registry: registry,
 		llm:      llmClient,
+		logger:   zap.NewNop(),
 	}
+}
+
+// SetLogger 设置日志器
+func (a *CharacterAgent) SetLogger(log *zap.Logger) {
+	if log != nil {
+		a.logger = log
+	}
+}
+
+// getLogger 获取日志器
+func (a *CharacterAgent) getLogger() *zap.Logger {
+	if a.logger == nil {
+		a.logger = zap.NewNop()
+	}
+	return a.logger
 }
 
 // Name 返回Agent名称
@@ -58,9 +78,22 @@ func (a *CharacterAgent) Tools() []tool.Tool {
 
 // Execute 执行Agent逻辑
 func (a *CharacterAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentResponse, error) {
+	log := a.getLogger()
+
+	log.Debug("[CharacterAgent] Execute started",
+		zap.String("userInput", req.UserInput),
+		zap.Int("historyLength", len(req.Context.History)),
+	)
+
 	systemPrompt := a.SystemPrompt(req.Context)
+	log.Debug("[CharacterAgent] System prompt built",
+		zap.Int("promptLength", len(systemPrompt)),
+	)
 
 	messages := a.buildMessages(systemPrompt, req)
+	log.Debug("[CharacterAgent] Messages built",
+		zap.Int("messageCount", len(messages)),
+	)
 
 	tools := make([]map[string]any, 0)
 	for _, t := range a.Tools() {
@@ -73,18 +106,72 @@ func (a *CharacterAgent) Execute(ctx context.Context, req *AgentRequest) (*Agent
 			},
 		})
 	}
+	log.Debug("[CharacterAgent] Tools retrieved",
+		zap.Int("toolCount", len(tools)),
+	)
+
+	// 打印发送给LLM的消息
+	for i, msg := range messages {
+		roleStr := string(msg.Role)
+		content := msg.Content
+		if len(content) > 300 {
+			content = content[:300] + "..."
+		}
+		toolCallNames := make([]string, 0, len(msg.ToolCalls))
+		for _, tc := range msg.ToolCalls {
+			toolCallNames = append(toolCallNames, tc.Name)
+		}
+		log.Debug("[CharacterAgent] LLM request message",
+			zap.Int("index", i),
+			zap.String("role", roleStr),
+			zap.String("content", content),
+			zap.Int("toolCalls", len(msg.ToolCalls)),
+			zap.Strings("toolNames", toolCallNames),
+		)
+	}
 
 	llmReq := &llm.CompletionRequest{
 		Messages: messages,
 		Tools:    tools,
 	}
 
+	log.Debug("[CharacterAgent] Calling LLM",
+		zap.Int("messageCount", len(messages)),
+		zap.Int("toolCount", len(tools)),
+	)
+
 	resp, err := a.llm.Complete(ctx, llmReq)
 	if err != nil {
+		log.Error("[CharacterAgent] LLM completion failed",
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("llm completion failed: %w", err)
 	}
 
-	return a.parseResponse(resp)
+	log.Debug("[CharacterAgent] LLM response received",
+		zap.String("content", truncateForLog(resp.Content, 300)),
+		zap.Int("toolCalls", len(resp.ToolCalls)),
+		zap.String("finishReason", string(resp.FinishReason)),
+		zap.Int("promptTokens", resp.Usage.PromptTokens),
+		zap.Int("completionTokens", resp.Usage.CompletionTokens),
+		zap.Int("totalTokens", resp.Usage.TotalTokens),
+	)
+
+	agentResp, err := a.parseResponse(resp)
+	if err != nil {
+		log.Error("[CharacterAgent] parseResponse failed",
+			zap.Error(err),
+		)
+		return nil, err
+	}
+
+	log.Debug("[CharacterAgent] Execute completed",
+		zap.String("nextAction", agentResp.NextAction.String()),
+		zap.String("content", truncateForLog(agentResp.Content, 200)),
+		zap.Int("toolCalls", len(agentResp.ToolCalls)),
+	)
+
+	return agentResp, nil
 }
 
 // CanHandle 判断是否能处理该意图
@@ -134,19 +221,45 @@ func (a *CharacterAgent) buildMessages(systemPrompt string, req *AgentRequest) [
 
 // parseResponse 解析LLM响应
 func (a *CharacterAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse, error) {
+	log := a.getLogger()
+
+	log.Debug("[CharacterAgent] parseResponse started",
+		zap.String("content", truncateForLog(resp.Content, 200)),
+		zap.Int("toolCalls", len(resp.ToolCalls)),
+	)
+
 	agentResp := &AgentResponse{
 		Content: resp.Content,
 	}
 
 	if len(resp.ToolCalls) > 0 {
+		log.Debug("[CharacterAgent] Tool calls detected",
+			zap.Int("count", len(resp.ToolCalls)),
+		)
+
+		// 打印每个tool call
+		for i, tc := range resp.ToolCalls {
+			argsJSON, _ := json.Marshal(tc.Arguments)
+			log.Debug("[CharacterAgent] Tool call",
+				zap.Int("index", i),
+				zap.String("toolName", tc.Name),
+				zap.String("toolCallID", tc.ID),
+				zap.String("arguments", truncateForLog(string(argsJSON), 200)),
+			)
+		}
+
 		agentResp.ToolCalls = resp.ToolCalls
 		agentResp.NextAction = ActionContinue
 		return agentResp, nil
 	}
 
 	if resp.Content != "" {
+		log.Debug("[CharacterAgent] Response content ready for player",
+			zap.String("content", truncateForLog(resp.Content, 200)),
+		)
 		agentResp.NextAction = ActionRespondToPlayer
 	} else {
+		log.Debug("[CharacterAgent] No content, waiting for input")
 		agentResp.NextAction = ActionWaitForInput
 	}
 

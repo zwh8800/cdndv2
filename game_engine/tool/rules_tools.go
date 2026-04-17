@@ -52,6 +52,7 @@ func NewPerformAbilityCheckTool(e *engine.Engine) *PerformAbilityCheckTool {
 				"required": []string{"game_id", "actor_id", "ability"},
 			},
 			e,
+			false, // write - modifies game state with check result
 		),
 	}
 }
@@ -144,6 +145,7 @@ func NewPerformSkillCheckTool(e *engine.Engine) *PerformSkillCheckTool {
 				"required": []string{"game_id", "actor_id", "skill"},
 			},
 			e,
+			false, // write - modifies game state with check result
 		),
 	}
 }
@@ -228,6 +230,7 @@ func NewPerformSavingThrowTool(e *engine.Engine) *PerformSavingThrowTool {
 				"required": []string{"game_id", "actor_id", "ability", "dc"},
 			},
 			e,
+			false, // write - modifies game state with check result
 		),
 	}
 }
@@ -296,6 +299,7 @@ func NewGetPassivePerceptionTool(e *engine.Engine) *GetPassivePerceptionTool {
 				"required": []string{"game_id", "actor_id"},
 			},
 			e,
+			true, // read-only - just queries a value
 		),
 	}
 }
@@ -354,6 +358,7 @@ func NewShortRestTool(e *engine.Engine) *ShortRestTool {
 				"required": []string{"game_id", "actor_ids"},
 			},
 			e,
+			false, // write - modifies HP/spell slots
 		),
 	}
 }
@@ -428,6 +433,7 @@ func NewCastSpellTool(e *engine.Engine) *CastSpellTool {
 				"required": []string{"game_id", "caster_id", "spell_id"},
 			},
 			e,
+			false, // write - uses spell slot, applies effects
 		),
 	}
 }
@@ -500,6 +506,7 @@ func NewGetSpellSlotsTool(e *engine.Engine) *GetSpellSlotsTool {
 				"required": []string{"game_id", "caster_id"},
 			},
 			e,
+			true, // read-only - just queries
 		),
 	}
 }
@@ -560,6 +567,7 @@ func NewPrepareSpellsTool(e *engine.Engine) *PrepareSpellsTool {
 				"required": []string{"game_id", "caster_id", "spell_ids"},
 			},
 			e,
+			false, // write - modifies prepared spells list
 		),
 	}
 }
@@ -625,6 +633,7 @@ func NewLearnSpellTool(e *engine.Engine) *LearnSpellTool {
 				"required": []string{"game_id", "caster_id", "spell_id"},
 			},
 			e,
+			false, // write - adds spell to known list
 		),
 	}
 }
@@ -685,6 +694,7 @@ func NewConcentrationCheckTool(e *engine.Engine) *ConcentrationCheckTool {
 				"required": []string{"game_id", "caster_id", "damage_taken"},
 			},
 			e,
+			false, // write - may break concentration
 		),
 	}
 }
@@ -742,6 +752,7 @@ func NewEndConcentrationTool(e *engine.Engine) *EndConcentrationTool {
 				"required": []string{"game_id", "caster_id"},
 			},
 			e,
+			false, // write - removes concentration
 		),
 	}
 }
@@ -797,6 +808,7 @@ func NewStartLongRestTool(e *engine.Engine) *StartLongRestTool {
 				"required": []string{"game_id", "actor_ids"},
 			},
 			e,
+			false, // write - starts rest
 		),
 	}
 }
@@ -853,6 +865,7 @@ func NewEndLongRestTool(e *engine.Engine) *EndLongRestTool {
 				"required": []string{"game_id"},
 			},
 			e,
+			false, // write - restores HP/spell slots
 		),
 	}
 }

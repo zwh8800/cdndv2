@@ -67,6 +67,7 @@ func NewCreatePCTool(e *engine.Engine) *CreatePCTool {
 				"required": []string{"game_id", "name", "race", "class", "ability_scores"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -190,6 +191,7 @@ func NewCreateNPCTool(e *engine.Engine) *CreateNPCTool {
 				"required": []string{"game_id", "name"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -295,6 +297,7 @@ func NewCreateEnemyTool(e *engine.Engine) *CreateEnemyTool {
 				"required": []string{"game_id", "name"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -381,6 +384,7 @@ func NewCreateCompanionTool(e *engine.Engine) *CreateCompanionTool {
 				"required": []string{"game_id", "name"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -450,6 +454,7 @@ func NewGetActorTool(e *engine.Engine) *GetActorTool {
 				"required": []string{"game_id", "actor_id"},
 			},
 			e,
+			true,
 		),
 	}
 }
@@ -505,6 +510,7 @@ func NewGetPCTool(e *engine.Engine) *GetPCTool {
 				"required": []string{"game_id", "pc_id"},
 			},
 			e,
+			true,
 		),
 	}
 }
@@ -560,6 +566,7 @@ func NewListActorsTool(e *engine.Engine) *ListActorsTool {
 				"required": []string{"game_id"},
 			},
 			e,
+			true,
 		),
 	}
 }
@@ -623,6 +630,7 @@ func NewUpdateActorTool(e *engine.Engine) *UpdateActorTool {
 				"required": []string{"game_id", "actor_id", "updates"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -705,6 +713,7 @@ func NewRemoveActorTool(e *engine.Engine) *RemoveActorTool {
 				"required": []string{"game_id", "actor_id"},
 			},
 			e,
+			false,
 		),
 	}
 }
@@ -763,6 +772,7 @@ func NewAddExperienceTool(e *engine.Engine) *AddExperienceTool {
 				"required": []string{"game_id", "pc_id", "xp"},
 			},
 			e,
+			false,
 		),
 	}
 }

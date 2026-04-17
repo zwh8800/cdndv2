@@ -31,6 +31,9 @@
 | 自行计算升级/经验/熟练加值 | 调用 `AddExperience` / `LevelUp` |
 | 自行计算负重/库存/装备效果 | 调用 `AddItem` / `EquipItem` / `GetInventory` |
 | 自行计算状态效果/专注/死亡豁免 | 调用引擎对应API |
+| 自行计算力竭/诅咒/毒药效果 | 调用 `ApplyExhaustion` / `CurseActor` / `ApplyPoison` |
+| 自行计算环境伤害/跌落伤害 | 调用 `ResolveEnvironmentalDamage` / `ApplyFallDamage` |
+| 自行计算骑乘/移动规则 | 调用 `MountCreature` / `PerformJump` |
 | 自行实现D&D规则判断逻辑 | 所有规则判断由引擎执行 |
 
 **允许的LLM判断：**
@@ -105,7 +108,7 @@
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        D&D Core Engine                               │
-│                  (116个API / 严格规则执行)                           │
+│                  (178个API / 严格规则执行)                           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -144,11 +147,14 @@ ReAct循环控制器是整个游戏引擎的核心调度器，负责：
 
 | 功能 | 相关API |
 |------|---------|
-| 创建角色 | CreatePC, CreateNPC, CreateEnemy |
-| 角色查询 | GetActor, GetPC, ListActors |
+| 创建角色 | CreatePC, CreateNPC, CreateEnemy, CreateCompanion |
+| 角色查询 | GetActor, GetPC, ListActors, GetActorSheet |
 | 角色更新 | UpdateActor, RemoveActor |
 | 升级管理 | AddExperience, LevelUp |
 | 休息恢复 | ShortRest, StartLongRest, EndLongRest |
+| 背景系统 | ApplyBackground, GetBackgroundFeatures |
+| 多职业系统 | ValidateMulticlassChoice, GetMulticlassSpellSlots |
+| 生活方式 | SetLifestyle, AdvanceGameTime, GetLifestyleInfo |
 
 #### 4.3.2 Combat Agent (战斗Agent)
 
@@ -157,11 +163,13 @@ ReAct循环控制器是整个游戏引擎的核心调度器，负责：
 | 功能 | 相关API |
 |------|---------|
 | 战斗初始化 | StartCombat, StartCombatWithSurprise |
-| 回合管理 | NextTurn, GetCurrentTurn |
-| 动作执行 | ExecuteAction, ExecuteAttack |
+| 回合管理 | NextTurn, GetCurrentTurn, GetCurrentCombat, GetCombatSummary |
+| 动作执行 | ExecuteAction, ExecuteAttack, AttemptOpportunityAttack |
 | 伤害治疗 | ExecuteDamage, ExecuteHealing |
 | 移动控制 | MoveActor |
-| 战斗结束 | EndCombat, GetCurrentCombat |
+| 死亡豁免 | PerformDeathSave, StabilizeCreature, GetDeathSaveStatus |
+| 战斗结束 | EndCombat |
+| 环境效果 | SetEnvironment, ResolveEnvironmentalDamage |
 
 #### 4.3.3 Narrative Agent (叙事Agent)
 
@@ -169,10 +177,12 @@ ReAct循环控制器是整个游戏引擎的核心调度器，负责：
 
 | 功能 | 相关API |
 |------|---------|
-| 场景管理 | CreateScene, GetScene, UpdateScene |
-| 场景切换 | SetCurrentScene, MoveActorToScene |
-| 物品交互 | AddItemToScene, GetSceneItems |
+| 场景管理 | CreateScene, GetScene, UpdateScene, DeleteScene, ListScenes |
+| 场景切换 | SetCurrentScene, MoveActorToScene, GetCurrentScene |
+| 物品交互 | AddItemToScene, RemoveItemFromScene, GetSceneItems |
 | 场景连接 | AddSceneConnection, RemoveSceneConnection |
+| 探索系统 | StartTravel, AdvanceTravel, Forage, Navigate |
+| 陷阱系统 | PlaceTrap, DetectTrap, DisarmTrap, TriggerTrap |
 
 #### 4.3.4 Rules Agent (规则Agent)
 
@@ -180,11 +190,17 @@ ReAct循环控制器是整个游戏引擎的核心调度器，负责：
 
 | 功能 | 相关API |
 |------|---------|
-| 属性检定 | PerformAbilityCheck |
+| 属性检定 | PerformAbilityCheck, GetSkillAbility |
 | 技能检定 | PerformSkillCheck |
 | 豁免检定 | PerformSavingThrow |
 | 被动感知 | GetPassivePerception |
-| 法术相关 | CastSpell, GetSpellSlots, ConcentrationCheck |
+| 法术相关 | CastSpell, GetSpellSlots, ConcentrationCheck, PrepareSpells, LearnSpell |
+| 魔契法术 | GetPactMagicSlots, RestorePactMagicSlots |
+| 仪式施法 | CastSpellRitual |
+| 骰子系统 | Roll, RollAdvantage, RollDisadvantage, RollAbility, RollHitDice |
+| 状态效果 | ApplyExhaustion, RemoveExhaustion, GetExhaustionStatus, GetExhaustionEffects |
+| 诅咒系统 | CurseActor, RemoveCurse, GetCurses |
+| 毒药系统 | ApplyPoison, ResolvePoisonEffect, RemovePoison |
 
 #### 4.3.5 NPC Agent (NPC行为Agent)
 
@@ -193,8 +209,8 @@ ReAct循环控制器是整个游戏引擎的核心调度器，负责：
 | 功能 | 相关API |
 |------|---------|
 | NPC交互 | InteractWithNPC, GetNPCAttitude |
-| 怪物管理 | CreateEnemyFromStatBlock |
-| 怪物动作 | GetMonsterActions, UseLegendaryAction |
+| 怪物管理 | LoadMonster, CreateEnemy |
+| 社交互动 | InteractWithNPC, GetNPCAttitude |
 
 #### 4.3.6 Memory Agent (记忆Agent)
 
@@ -202,9 +218,72 @@ ReAct循环控制器是整个游戏引擎的核心调度器，负责：
 
 | 功能 | 相关API |
 |------|---------|
-| 任务管理 | CreateQuest, UpdateQuestObjective, CompleteQuest |
-| 任务查询 | GetQuest, ListQuests, GetActorQuests |
-| 游戏存档 | SaveGame, LoadGame, ListGames |
+| 任务管理 | CreateQuest, UpdateQuestObjective, CompleteQuest, FailQuest, AcceptQuest |
+| 任务查询 | GetQuest, ListQuests, GetActorQuests, GetQuestGiverQuests |
+| 游戏存档 | SaveGame, LoadGame, ListGames, DeleteGame, GetGame |
+| 状态查询 | GetStateSummary, GetActorSheet, GetCombatSummary |
+| 阶段管理 | SetPhase, GetPhase, GetAllowedOperations |
+
+#### 4.3.7 Movement Agent (移动Agent) [新增]
+
+负责移动和环境交互：
+
+| 功能 | 相关API |
+|------|---------|
+| 移动动作 | PerformJump, MoveActor |
+| 环境伤害 | ApplyFallDamage, ResolveEnvironmentalDamage |
+| 窒息系统 | CalculateBreathHolding, ApplySuffocation |
+| 遭遇检定 | PerformEncounterCheck |
+
+#### 4.3.8 Mount Agent (骑乘Agent) [新增]
+
+负责骑乘系统管理：
+
+| 功能 | 相关API |
+|------|---------|
+| 骑乘控制 | MountCreature, Dismount |
+| 速度计算 | CalculateMountSpeed |
+
+#### 4.3.9 Crafting Agent (制作Agent) [新增]
+
+负责物品制作系统：
+
+| 功能 | 相关API |
+|------|---------|
+| 制作过程 | StartCrafting, AdvanceCrafting, CompleteCrafting |
+| 配方查询 | GetCraftingRecipes, GetCraftingInfo |
+
+#### 4.3.10 Inventory Agent (库存Agent) [新增]
+
+负责详细的库存和装备管理：
+
+| 功能 | 相关API |
+|------|---------|
+| 物品管理 | AddItem, RemoveItem, TransferItem |
+| 装备管理 | EquipItem, UnequipItem, GetEquipment |
+| 魔法物品 | AttuneItem, UnattuneItem, UseMagicItem, RechargeMagicItems, GetMagicItemBonus |
+| 货币管理 | AddCurrency |
+| 负重查询 | GetCarryingCapacity |
+
+#### 4.3.11 Data Query Agent (数据查询Agent) [新增]
+
+负责游戏数据查询：
+
+| 功能 | 相关API |
+|------|---------|
+| 种族数据 | ListRaces, GetRace |
+| 职业数据 | ListClasses, GetClass |
+| 背景数据 | ListBackgrounds, GetBackground |
+| 专长数据 | ListFeatsData, GetFeatData, ListFeats, GetFeatDetails |
+| 怪物数据 | ListMonsters, GetMonster, LoadMonster |
+| 法术数据 | ListSpells, GetSpell |
+| 装备数据 | ListWeapons, GetWeapon, ListArmors, GetArmor, ListGears, GetGear, ListTools, GetTool |
+| 魔法物品 | ListMagicItems, GetMagicItem |
+| 配方数据 | ListRecipes, GetRecipe |
+| 生活方式 | ListLifestylesData, GetLifestyleData |
+| 骑乘生物 | ListMounts, GetMount |
+| 毒药数据 | ListPoisons, GetPoison |
+| 陷阱数据 | ListTraps, GetTrap |
 
 ### 4.4 Tool Registry
 
@@ -305,11 +384,14 @@ Agent决策需要调用Tool
 GameState
 ├── GameID: 游戏会话ID
 ├── CurrentSceneID: 当前场景ID
+├── Phase: 当前游戏阶段 (Exploration/Combat/Social/Rest/Crafting/Travel)
 ├── CombatState: 战斗状态(如果正在战斗)
 ├── Actors: 所有角色列表
 ├── Scenes: 所有场景列表
 ├── Quests: 所有任务列表
-└── GameTime: 游戏时间
+├── GameTime: 游戏时间
+├── Environment: 环境条件 (光照、天气、温度等)
+└── ActiveEffects: 活跃效果列表 (专注、诅咒、毒药等)
 ```
 
 ### 6.2 Agent上下文
@@ -333,19 +415,28 @@ type AgentContext struct {
 
 ```go
 var (
-    ErrNotFound              // 实体不存在
-    ErrAlreadyExists         // 实体已存在
-    ErrInvalidState          // 无效状态
-    ErrCombatNotActive       // 战斗未激活
-    ErrCombatAlreadyActive   // 战斗已激活
-    ErrNotYourTurn           // 不是该角色回合
-    ErrActionAlreadyUsed     // 动作已使用
-    ErrInsufficientSlots     // 法术位不足
-    ErrInvalidTarget         // 无效目标
-    ErrOutOfRange            // 超出范围
-    ErrNoLineOfSight         // 无视线
-    ErrConcentrationBroken   // 专注失败
-    ErrActorIncapacitated    // 角色失去行动能力
+    ErrNotFound               // 实体不存在
+    ErrAlreadyExists          // 实体已存在
+    ErrInvalidState           // 无效状态
+    ErrInvalidPhase           // 无效游戏阶段
+    ErrCombatNotActive        // 战斗未激活
+    ErrCombatAlreadyActive    // 战斗已激活
+    ErrNotYourTurn            // 不是该角色回合
+    ErrActionAlreadyUsed      // 动作已使用
+    ErrBonusActionAlreadyUsed // bonus动作已使用
+    ErrReactionAlreadyUsed    // 反应已使用
+    ErrInsufficientSlots      // 法术位不足
+    ErrInvalidTarget          // 无效目标
+    ErrOutOfRange             // 超出范围
+    ErrNoLineOfSight          // 无视线
+    ErrConcentrationBroken    // 专注失败
+    ErrActorIncapacitated     // 角色失去行动能力
+    ErrActorDead              // 角色已死亡
+    ErrActorDying             // 角色濒死
+    ErrExhaustionTooHigh      // 力竭等级过高
+    ErrInvalidMulticlass      // 无效多职业组合
+    ErrCraftingInProgress     // 制作进行中
+    ErrMountUnavailable       // 骑乘不可用
 )
 ```
 
@@ -395,27 +486,47 @@ game_engine/
 ├── context.go             # 上下文管理
 │
 ├── agent/
-│   ├── agent.go           # Agent接口定义
-│   ├── main_agent.go      # 主Agent(DM)
-│   ├── character_agent.go # 角色管理Agent
-│   ├── combat_agent.go    # 战斗Agent
-│   ├── narrative_agent.go # 叙事Agent
-│   ├── rules_agent.go     # 规则Agent
-│   ├── npc_agent.go       # NPC行为Agent
-│   └── memory_agent.go    # 记忆Agent
+│   ├── agent.go            # Agent接口定义
+│   ├── main_agent.go       # 主Agent(DM)
+│   ├── character_agent.go  # 角色管理Agent
+│   ├── combat_agent.go     # 战斗Agent
+│   ├── narrative_agent.go  # 叙事Agent
+│   ├── rules_agent.go      # 规则Agent
+│   ├── npc_agent.go        # NPC行为Agent
+│   ├── memory_agent.go     # 记忆Agent
+│   ├── movement_agent.go   # 移动Agent [新增]
+│   ├── mount_agent.go      # 骑乘Agent [新增]
+│   ├── crafting_agent.go   # 制作Agent [新增]
+│   ├── inventory_agent.go  # 库存Agent [新增]
+│   └── data_query_agent.go # 数据查询Agent [新增]
 │
 ├── tool/
-│   ├── registry.go        # Tool注册中心
-│   ├── tool.go            # Tool接口定义
-│   ├── game_tools.go      # 游戏会话相关Tools
-│   ├── actor_tools.go     # 角色管理Tools
-│   ├── combat_tools.go    # 战斗系统Tools
-│   ├── spell_tools.go     # 法术系统Tools
-│   ├── check_tools.go     # 检定系统Tools
-│   ├── inventory_tools.go # 库存管理Tools
-│   ├── scene_tools.go     # 场景管理Tools
-│   ├── quest_tools.go     # 任务系统Tools
-│   └── exploration_tools.go # 探索系统Tools
+│   ├── registry.go         # Tool注册中心
+│   ├── tool.go             # Tool接口定义
+│   ├── game_tools.go       # 游戏会话相关Tools
+│   ├── actor_tools.go      # 角色管理Tools
+│   ├── combat_tools.go     # 战斗系统Tools
+│   ├── spell_tools.go      # 法术系统Tools
+│   ├── check_tools.go      # 检定系统Tools
+│   ├── inventory_tools.go  # 库存管理Tools
+│   ├── scene_tools.go      # 场景管理Tools
+│   ├── quest_tools.go      # 任务系统Tools
+│   ├── exploration_tools.go # 探索系统Tools
+│   ├── background_tools.go # 背景系统Tools [新增]
+│   ├── crafting_tools.go   # 制作系统Tools [新增]
+│   ├── curse_tools.go      # 诅咒系统Tools [新增]
+│   ├── environment_tools.go # 环境系统Tools [新增]
+│   ├── exhaustion_tools.go # 力竭系统Tools [新增]
+│   ├── mount_tools.go      # 骑乘系统Tools [新增]
+│   ├── movement_tools.go   # 移动系统Tools [新增]
+│   ├── poison_tools.go     # 毒药系统Tools [新增]
+│   ├── trap_tools.go       # 陷阱系统Tools [新增]
+│   ├── magic_item_tools.go # 魔法物品Tools [新增]
+│   ├── multiclass_tools.go # 多职业Tools [新增]
+│   ├── lifestyle_tools.go  # 生活方式Tools [新增]
+│   ├── dice_tools.go       # 骰子系统Tools [新增]
+│   ├── data_query_tools.go # 数据查询Tools [新增]
+│   └── phase_tools.go      # 阶段管理Tools [新增]
 │
 ├── llm/
 │   ├── client.go          # LLM客户端接口
@@ -441,16 +552,22 @@ game_engine/
 4. LLM客户端接口
 
 ### Phase 2: 核心功能
-1. Character Agent + 角色相关Tools
-2. Combat Agent + 战斗相关Tools
-3. Rules Agent + 检定相关Tools
+1. Character Agent + 角色相关Tools (含背景、多职业、生活方式)
+2. Combat Agent + 战斗相关Tools (含死亡豁免、环境效果)
+3. Rules Agent + 检定相关Tools (含法术、骰子、状态效果)
+4. Inventory Agent + 库存相关Tools (含魔法物品)
 
 ### Phase 3: 扩展功能
-1. Narrative Agent + 场景相关Tools
+1. Narrative Agent + 场景相关Tools (含探索、陷阱)
 2. NPC Agent + NPC相关Tools
-3. Memory Agent + 任务/存档Tools
+3. Memory Agent + 任务/存档Tools (含阶段管理、状态查询)
+4. Movement Agent + 移动相关Tools (含环境伤害、窒息)
+5. Mount Agent + 骑乘相关Tools
+6. Crafting Agent + 制作相关Tools
+7. Data Query Agent + 数据查询Tools
 
 ### Phase 4: 优化完善
 1. 错误处理优化
 2. 性能优化
 3. 提示词优化
+4. 新增系统整合 (诅咒、力竭、毒药等)

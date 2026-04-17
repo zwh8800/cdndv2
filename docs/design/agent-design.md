@@ -119,12 +119,17 @@ type SubAgent interface {
 # 可用能力
 
 你可以调用以下子Agent来处理特定任务：
-- `character_agent`: 角色创建、属性管理、升级、休息
-- `combat_agent`: 战斗流程、回合管理、攻击伤害
-- `narrative_agent`: 场景管理、物品交互、环境描述
-- `rules_agent`: 检定、豁免、法术施放
+- `character_agent`: 角色创建、属性管理、升级、休息、背景、多职业、生活方式
+- `combat_agent`: 战斗流程、回合管理、攻击伤害、死亡豁免、环境效果
+- `narrative_agent`: 场景管理、物品交互、环境描述、探索、陷阱
+- `rules_agent`: 检定、豁免、法术施放、骰子、状态效果（力竭/诅咒/毒药）
 - `npc_agent`: NPC行为、态度、互动
-- `memory_agent`: 任务管理、游戏存档
+- `memory_agent`: 任务管理、游戏存档、状态查询、阶段管理
+- `movement_agent`: 移动、跳跃、跌落、窒息、遭遇检定
+- `mount_agent`: 骑乘系统
+- `crafting_agent`: 物品制作
+- `inventory_agent`: 详细库存和装备管理、魔法物品
+- `data_query_agent`: 游戏数据查询（种族、职业、法术、装备等）
 
 # 工作流程
 
@@ -236,7 +241,10 @@ var mainAgentTools = []Tool{
 | 属性管理 | 查询和更新角色属性 |
 | 升级处理 | 经验值添加、等级提升 |
 | 休息恢复 | 短休、长休的生命值和资源恢复 |
-| 装备管理 | 物品获取、装备穿戴、调谐 |
+| 背景系统 | 应用背景、获取背景特性 |
+| 多职业系统 | 验证多职业选择、获取法术位 |
+| 生活方式 | 设置生活方式、推进游戏时间 |
+| 装备管理 | 物品获取、装备穿戴、调谐（基础） |
 
 ### 3.2 系统提示词
 
@@ -310,8 +318,7 @@ var characterQueryTools = []Tool{
     &GetActorTool{},
     &GetPCTool{},
     &ListActorsTool{},
-    &GetInventoryTool{},
-    &GetEquipmentTool{},
+    &GetActorSheetTool{},
 }
 
 // 角色更新Tools
@@ -329,15 +336,23 @@ var restTools = []Tool{
     &EndLongRestTool{},
 }
 
-// 库存Tools
-var inventoryTools = []Tool{
-    &AddItemTool{},
-    &RemoveItemTool{},
-    &EquipItemTool{},
-    &UnequipItemTool{},
-    &AttuneItemTool{},
-    &TransferItemTool{},
-    &AddCurrencyTool{},
+// 背景Tools
+var backgroundTools = []Tool{
+    &ApplyBackgroundTool{},
+    &GetBackgroundFeaturesTool{},
+}
+
+// 多职业Tools
+var multiclassTools = []Tool{
+    &ValidateMulticlassChoiceTool{},
+    &GetMulticlassSpellSlotsTool{},
+}
+
+// 生活方式Tools
+var lifestyleTools = []Tool{
+    &SetLifestyleTool{},
+    &AdvanceGameTimeTool{},
+    &GetLifestyleInfoTool{},
 }
 ```
 
@@ -388,8 +403,9 @@ var inventoryTools = []Tool{
 |------|------|
 | 战斗初始化 | 开始战斗、计算先攻、处理突袭 |
 | 回合管理 | 控制回合顺序、推进回合 |
-| 动作执行 | 攻击、施法、移动、其他动作 |
-| 伤害处理 | 伤害计算、治疗、死亡豁免 |
+| 动作执行 | 攻击、施法、移动、其他动作、借机攻击 |
+| 伤害处理 | 伤害计算、治疗、死亡豁免、稳定 |
+| 环境效果 | 设置环境、结算环境伤害 |
 | 战斗结束 | 判断战斗结束、发放经验 |
 
 ### 4.2 系统提示词
@@ -545,7 +561,9 @@ var damageHealingTools = []Tool{
 | 属性检定 | 执行力量、敏捷等属性检定 |
 | 技能检定 | 执行各种技能检定 |
 | 豁免检定 | 执行豁免检定 |
-| 法术系统 | 施法、专注检定、法术位管理 |
+| 法术系统 | 施法、专注检定、法术位管理、仪式施法 |
+| 骰子系统 | 各种骰子投掷 |
+| 状态效果 | 力竭、诅咒、毒药效果管理 |
 
 ### 5.2 系统提示词
 
@@ -579,6 +597,32 @@ var damageHealingTools = []Tool{
 - concentration_check: 专注检定
 - end_concentration: 结束专注
 - is_concentrating: 检查专注状态
+- get_concentration_spell: 获取专注法术详情
+- get_pact_magic_slots: 获取魔契师法术位
+- restore_pact_magic_slots: 恢复魔契师法术位
+
+## 骰子系统
+- roll: 执行骰子投掷
+- roll_advantage: 优势骰
+- roll_disadvantage: 劣势骰
+- roll_ability: 属性骰
+- roll_hit_dice: 生命骰
+
+## 力竭系统
+- apply_exhaustion: 增加力竭等级
+- remove_exhaustion: 移除力竭等级
+- get_exhaustion_status: 获取力竭状态
+- get_exhaustion_effects: 获取力竭效果描述
+
+## 诅咒系统
+- curse_actor: 对角色施加诅咒
+- remove_curse: 移除诅咒
+- get_curses: 获取诅咒列表
+
+## 毒药系统
+- apply_poison: 施加毒药效果
+- resolve_poison_effect: 结算毒药效果
+- remove_poison: 移除毒药
 
 # DC难度参考
 
@@ -615,6 +659,37 @@ var spellTools = []Tool{
     &GetConcentrationSpellTool{},
     &GetPactMagicSlotsTool{},
     &RestorePactMagicSlotsTool{},
+}
+
+// 骰子Tools
+var diceTools = []Tool{
+    &RollTool{},
+    &RollAdvantageTool{},
+    &RollDisadvantageTool{},
+    &RollAbilityTool{},
+    &RollHitDiceTool{},
+}
+
+// 力竭Tools
+var exhaustionTools = []Tool{
+    &ApplyExhaustionTool{},
+    &RemoveExhaustionTool{},
+    &GetExhaustionStatusTool{},
+    &GetExhaustionEffectsTool{},
+}
+
+// 诅咒Tools
+var curseTools = []Tool{
+    &CurseActorTool{},
+    &RemoveCurseTool{},
+    &GetCursesTool{},
+}
+
+// 毒药Tools
+var poisonTools = []Tool{
+    &ApplyPoisonTool{},
+    &ResolvePoisonEffectTool{},
+    &RemovePoisonTool{},
 }
 ```
 
@@ -665,6 +740,12 @@ var spellTools = []Tool{
 - advance_travel: 推进旅行
 - forage: 觅食
 - navigate: 导航检定
+
+## 陷阱系统
+- place_trap: 在场景中放置陷阱
+- detect_trap: 尝试侦测陷阱
+- disarm_trap: 尝试解除陷阱
+- trigger_trap: 触发陷阱
 ```
 
 ### 6.3 Tool定义
@@ -698,6 +779,12 @@ var narrativeTools = []Tool{
     &AdvanceTravelTool{},
     &ForageTool{},
     &NavigateTool{},
+
+    // 陷阱系统
+    &PlaceTrapTool{},
+    &DetectTrapTool{},
+    &DisarmTrapTool{},
+    &TriggerTrapTool{},
 }
 ```
 
@@ -725,11 +812,8 @@ var narrativeTools = []Tool{
 - get_npc_attitude: 获取NPC态度
 
 ## 怪物管理
-- create_enemy_from_stat_block: 从数据块创建怪物
-- get_monster_actions: 获取怪物可用动作
-- use_legendary_action: 使用传说动作
-- use_recharge_action: 使用充能动作
-- recharge_monster_actions: 充能怪物动作
+- load_monster: 从模板加载怪物
+- create_enemy: 创建敌人
 ```
 
 ### 7.3 Tool定义
@@ -741,11 +825,8 @@ var npcTools = []Tool{
     &GetNPCAttitudeTool{},
 
     // 怪物管理
-    &CreateEnemyFromStatBlockTool{},
-    &GetMonsterActionsTool{},
-    &UseLegendaryActionTool{},
-    &UseRechargeActionTool{},
-    &RechargeMonsterActionsTool{},
+    &LoadMonsterTool{},
+    &CreateEnemyTool{},
 }
 ```
 
@@ -756,8 +837,10 @@ var npcTools = []Tool{
 | 职责 | 说明 |
 |------|------|
 | 任务管理 | 创建、更新、完成、失败任务 |
-| 游戏存档 | 保存、加载、列出游戏 |
+| 游戏存档 | 保存、加载、列出、获取游戏 |
 | 专长管理 | 获取、选择专长 |
+| 状态查询 | 状态摘要、角色卡、战斗摘要 |
+| 阶段管理 | 设置、获取游戏阶段、获取允许操作 |
 
 ### 8.2 系统提示词
 
@@ -791,6 +874,16 @@ var npcTools = []Tool{
 - select_feat: 选择专长
 - remove_feat: 移除专长
 - get_actor_feats: 获取角色专长
+
+## 状态查询
+- get_state_summary: 获取游戏状态摘要
+- get_actor_sheet: 获取角色完整数据表
+- get_combat_summary: 获取战斗摘要
+
+## 阶段管理
+- set_phase: 设置游戏阶段
+- get_phase: 获取当前游戏阶段
+- get_allowed_operations: 获取当前阶段允许的操作
 ```
 
 ### 8.3 Tool定义
@@ -813,6 +906,7 @@ var memoryTools = []Tool{
     &LoadGameTool{},
     &ListGamesTool{},
     &DeleteGameTool{},
+    &GetGameTool{},
 
     // 专长系统
     &ListFeatsTool{},
@@ -820,6 +914,16 @@ var memoryTools = []Tool{
     &SelectFeatTool{},
     &RemoveFeatTool{},
     &GetActorFeatsTool{},
+
+    // 状态查询
+    &GetStateSummaryTool{},
+    &GetActorSheetTool{},
+    &GetCombatSummaryTool{},
+
+    // 阶段管理
+    &SetPhaseTool{},
+    &GetPhaseTool{},
+    &GetAllowedOperationsTool{},
 }
 ```
 
@@ -881,4 +985,145 @@ Main Agent 汇总结果 → 生成响应
 
 执行顺序:
 Rules Agent → Combat Agent → Narrative Agent
+```
+
+## 10. Movement Agent [新增]
+
+### 10.1 职责定义
+
+| 职责 | 说明 |
+|------|------|
+| 移动动作 | 执行跳跃动作 |
+| 环境伤害 | 结算跌落伤害 |
+| 窒息系统 | 计算闭气时间、结算窒息效果 |
+| 遭遇检定 | 执行随机遭遇检定 |
+
+### 10.2 可用Tools
+
+```markdown
+## 移动系统
+- perform_jump: 执行跳跃动作
+- apply_fall_damage: 结算跌落伤害
+- calculate_breath_holding: 计算闭气时间
+- apply_suffocation: 结算窒息效果
+- perform_encounter_check: 执行随机遭遇检定
+```
+
+## 11. Mount Agent [新增]
+
+### 11.1 职责定义
+
+| 职责 | 说明 |
+|------|------|
+| 骑乘控制 | 骑乘/解除骑乘 |
+| 速度计算 | 计算骑乘状态下的速度 |
+
+### 11.2 可用Tools
+
+```markdown
+## 骑乘系统
+- mount_creature: 骑乘一个生物
+- dismount: 从骑乘生物上下来
+- calculate_mount_speed: 计算骑乘状态下的速度
+```
+
+## 12. Crafting Agent [新增]
+
+### 12.1 职责定义
+
+| 职责 | 说明 |
+|------|------|
+| 制作过程 | 开始、推进、完成物品制作 |
+| 配方查询 | 获取可用制作配方 |
+
+### 12.2 可用Tools
+
+```markdown
+## 制作系统
+- start_crafting: 开始制作物品
+- advance_crafting: 推进制作进度
+- complete_crafting: 完成制作并获取物品
+- get_crafting_recipes: 获取所有可用的制作配方
+- get_crafting_info: 获取角色制作信息
+```
+
+## 13. Inventory Agent [新增]
+
+### 13.1 职责定义
+
+| 职责 | 说明 |
+|------|------|
+| 物品管理 | 添加、移除、转移物品 |
+| 装备管理 | 装备、卸下装备、获取装备信息 |
+| 魔法物品 | 使用、调谐、充能魔法物品 |
+| 货币管理 | 添加货币 |
+| 负重查询 | 获取负重能力 |
+
+### 13.2 可用Tools
+
+```markdown
+## 物品管理
+- add_item: 添加物品到角色库存
+- remove_item: 从角色库存移除物品
+- transfer_item: 将物品从一个角色转移给另一个角色
+
+## 装备管理
+- equip_item: 装备物品到指定槽位
+- unequip_item: 卸下装备
+- get_equipment: 获取角色当前装备信息
+
+## 魔法物品
+- use_magic_item: 使用魔法物品
+- attune_item: 调谐魔法物品
+- unattune_item: 解除对魔法物品的调谐
+- recharge_magic_items: 恢复角色魔法物品的充能
+- get_magic_item_bonus: 获取角色从魔法物品获得的加值
+
+## 货币管理
+- add_currency: 添加货币
+
+## 负重查询
+- get_carrying_capacity: 获取角色负重能力
+```
+
+## 14. Data Query Agent [新增]
+
+### 14.1 职责定义
+
+| 职责 | 说明 |
+|------|------|
+| 种族数据 | 列出、获取种族详情 |
+| 职业数据 | 列出、获取职业详情 |
+| 背景数据 | 列出、获取背景详情 |
+| 专长数据 | 列出、获取专长详情 |
+| 怪物数据 | 列出、获取怪物详情 |
+| 法术数据 | 列出、获取法术详情 |
+| 装备数据 | 列出、获取武器/护甲/装备/工具详情 |
+| 魔法物品 | 列出、获取魔法物品详情 |
+| 配方数据 | 列出、获取配方详情 |
+| 生活方式 | 列出、获取生活方式数据 |
+| 骑乘生物 | 列出、获取骑乘生物详情 |
+| 毒药数据 | 列出、获取毒药详情 |
+| 陷阱数据 | 列出、获取陷阱详情 |
+
+### 14.2 可用Tools
+
+```markdown
+## 数据查询系统
+- list_races / get_race: 种族数据查询
+- list_classes / get_class: 职业数据查询
+- list_backgrounds / get_background: 背景数据查询
+- list_feats_data / get_feat_data: 专长数据查询
+- list_monsters / get_monster: 怪物数据查询
+- list_spells / get_spell: 法术数据查询
+- list_weapons / get_weapon: 武器数据查询
+- list_armors / get_armor: 护甲数据查询
+- list_gears / get_gear: 装备数据查询
+- list_tools / get_tool: 工具数据查询
+- list_magic_items / get_magic_item: 魔法物品查询
+- list_recipes / get_recipe: 配方数据查询
+- list_lifestyles_data / get_lifestyle_data: 生活方式数据
+- list_mounts / get_mount: 骑乘生物数据
+- list_poisons / get_poison: 毒药数据
+- list_traps / get_trap: 陷阱数据
 ```

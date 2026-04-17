@@ -86,18 +86,38 @@ func NewEngineTool(name, description string, schema map[string]any, e *engine.En
 
 | 分类 | Tool数量 | 说明 |
 |------|----------|------|
-| 游戏会话 | 5 | 创建、加载、保存、删除、列出游戏 |
+| 游戏会话 | 6 | 创建、加载、保存、删除、列出、获取游戏 |
 | 角色管理 | 10 | 创建、查询、更新、移除角色 |
+| 角色升级 | 2 | 经验值、等级提升 |
+| 休息系统 | 3 | 短休、长休 |
 | 战斗系统 | 12 | 战斗流程、动作执行、伤害治疗 |
-| 法术系统 | 10 | 施法、法术位、专注管理 |
+| 法术系统 | 11 | 施法、法术位、专注管理、仪式施法 |
 | 检定系统 | 5 | 属性、技能、豁免检定 |
-| 库存管理 | 10 | 物品、装备、货币管理 |
+| 库存管理 | 9 | 物品、装备、货币管理 |
 | 专长系统 | 5 | 专长查询、选择、移除 |
-| 场景管理 | 16 | 场景CRUD、连接、移动 |
+| 场景管理 | 14 | 场景CRUD、连接、移动 |
 | 探索系统 | 4 | 旅行、觅食、导航 |
 | 社交互动 | 2 | NPC互动、态度查询 |
 | 任务系统 | 10 | 任务CRUD、进度更新 |
 | 死亡豁免 | 3 | 死亡豁免、稳定、状态查询 |
+| 背景系统 | 2 | 应用背景、获取特性 |
+| 制作系统 | 4 | 开始、推进、完成制作 |
+| 诅咒系统 | 3 | 施加、移除、查询诅咒 |
+| 环境系统 | 2 | 设置环境、结算环境伤害 |
+| 力竭系统 | 3 | 施加、移除、查询力竭 |
+| 骑乘系统 | 3 | 骑乘、解除、速度计算 |
+| 移动系统 | 5 | 跳跃、跌落、闭气、窒息、遭遇检定 |
+| 毒药系统 | 3 | 施加、结算、移除毒药 |
+| 陷阱系统 | 4 | 放置、侦测、解除、触发陷阱 |
+| 魔法物品 | 4 | 使用、调谐、解除调谐、充能 |
+| 多职业系统 | 2 | 验证多职业、获取法术位 |
+| 生活方式 | 2 | 设置生活方式、推进时间 |
+| 骰子系统 | 5 | 各种骰子投掷 |
+| 数据查询 | 36 | 种族、职业、法术、装备等数据查询 |
+| 怪物系统 | 1 | 加载怪物模板 |
+| 信息聚合 | 4 | 生活方式、制作、负重、力竭效果查询 |
+| 状态查询 | 3 | 状态摘要、角色卡、战斗摘要 |
+| 阶段管理 | 3 | 设置、获取阶段、获取允许操作 |
 
 ### 2.2 按操作类型分类
 
@@ -1011,14 +1031,209 @@ func InitRegistry(e *engine.Engine) *ToolRegistry {
     registry.Register(NewSaveGameTool(e), []string{"main", "memory"}, "game")
     registry.Register(NewListGamesTool(e), []string{"main", "memory"}, "game")
     registry.Register(NewDeleteGameTool(e), []string{"main", "memory"}, "game")
+    registry.Register(NewGetGameTool(e), []string{"main", "memory"}, "game")
 
     // 角色管理Tools
     registry.Register(NewCreatePCTool(e), []string{"character", "main"}, "actor")
     registry.Register(NewCreateNPCTool(e), []string{"character", "npc"}, "actor")
     registry.Register(NewCreateEnemyTool(e), []string{"character", "combat", "npc"}, "actor")
+    registry.Register(NewCreateCompanionTool(e), []string{"character"}, "actor")
     registry.Register(NewGetActorTool(e), []string{"character", "combat", "rules", "main"}, "actor")
+    registry.Register(NewGetPCTool(e), []string{"character", "main"}, "actor")
     registry.Register(NewUpdateActorTool(e), []string{"character"}, "actor")
-    // ... 其他Tools
+    registry.Register(NewRemoveActorTool(e), []string{"character"}, "actor")
+    registry.Register(NewListActorsTool(e), []string{"character", "main"}, "actor")
+
+    // 升级与经验Tools
+    registry.Register(NewAddExperienceTool(e), []string{"character"}, "progression")
+    registry.Register(NewLevelUpTool(e), []string{"character"}, "progression")
+
+    // 休息系统Tools
+    registry.Register(NewShortRestTool(e), []string{"character"}, "rest")
+    registry.Register(NewStartLongRestTool(e), []string{"character"}, "rest")
+    registry.Register(NewEndLongRestTool(e), []string{"character"}, "rest")
+
+    // 背景系统Tools
+    registry.Register(NewApplyBackgroundTool(e), []string{"character"}, "background")
+    registry.Register(NewGetBackgroundFeaturesTool(e), []string{"character"}, "background")
+
+    // 多职业系统Tools
+    registry.Register(NewValidateMulticlassChoiceTool(e), []string{"character"}, "multiclass")
+    registry.Register(NewGetMulticlassSpellSlotsTool(e), []string{"character", "rules"}, "multiclass")
+
+    // 生活方式Tools
+    registry.Register(NewSetLifestyleTool(e), []string{"character"}, "lifestyle")
+    registry.Register(NewAdvanceGameTimeTool(e), []string{"character", "memory"}, "lifestyle")
+
+    // 战斗系统Tools
+    registry.Register(NewStartCombatTool(e), []string{"combat", "main"}, "combat")
+    registry.Register(NewStartCombatWithSurpriseTool(e), []string{"combat", "main"}, "combat")
+    registry.Register(NewEndCombatTool(e), []string{"combat", "main"}, "combat")
+    registry.Register(NewGetCurrentCombatTool(e), []string{"combat", "main"}, "combat")
+    registry.Register(NewNextTurnTool(e), []string{"combat"}, "combat")
+    registry.Register(NewGetCurrentTurnTool(e), []string{"combat", "main"}, "combat")
+    registry.Register(NewExecuteActionTool(e), []string{"combat"}, "combat")
+    registry.Register(NewExecuteAttackTool(e), []string{"combat"}, "combat")
+    registry.Register(NewExecuteDamageTool(e), []string{"combat"}, "combat")
+    registry.Register(NewExecuteHealingTool(e), []string{"combat"}, "combat")
+    registry.Register(NewMoveActorTool(e), []string{"combat", "movement"}, "combat")
+    registry.Register(NewAttemptOpportunityAttackTool(e), []string{"combat"}, "combat")
+
+    // 死亡豁免Tools
+    registry.Register(NewPerformDeathSaveTool(e), []string{"combat"}, "death_save")
+    registry.Register(NewStabilizeCreatureTool(e), []string{"combat"}, "death_save")
+    registry.Register(NewGetDeathSaveStatusTool(e), []string{"combat"}, "death_save")
+
+    // 环境系统Tools
+    registry.Register(NewSetEnvironmentTool(e), []string{"combat", "narrative"}, "environment")
+    registry.Register(NewResolveEnvironmentalDamageTool(e), []string{"combat", "rules"}, "environment")
+
+    // 检定系统Tools
+    registry.Register(NewPerformAbilityCheckTool(e), []string{"rules"}, "check")
+    registry.Register(NewPerformSkillCheckTool(e), []string{"rules"}, "check")
+    registry.Register(NewPerformSavingThrowTool(e), []string{"rules", "combat"}, "check")
+    registry.Register(NewGetSkillAbilityTool(e), []string{"rules"}, "check")
+    registry.Register(NewGetPassivePerceptionTool(e), []string{"rules", "npc"}, "check")
+
+    // 法术系统Tools
+    registry.Register(NewCastSpellTool(e), []string{"rules", "combat"}, "spell")
+    registry.Register(NewCastSpellRitualTool(e), []string{"rules"}, "spell")
+    registry.Register(NewGetSpellSlotsTool(e), []string{"rules", "character"}, "spell")
+    registry.Register(NewPrepareSpellsTool(e), []string{"rules", "character"}, "spell")
+    registry.Register(NewLearnSpellTool(e), []string{"rules", "character"}, "spell")
+    registry.Register(NewConcentrationCheckTool(e), []string{"rules", "combat"}, "spell")
+    registry.Register(NewEndConcentrationTool(e), []string{"rules"}, "spell")
+    registry.Register(NewIsConcentratingTool(e), []string{"rules"}, "spell")
+    registry.Register(NewGetConcentrationSpellTool(e), []string{"rules"}, "spell")
+    registry.Register(NewGetPactMagicSlotsTool(e), []string{"rules", "character"}, "spell")
+    registry.Register(NewRestorePactMagicSlotsTool(e), []string{"rules", "character"}, "spell")
+
+    // 库存管理Tools
+    registry.Register(NewAddItemTool(e), []string{"inventory", "character"}, "inventory")
+    registry.Register(NewRemoveItemTool(e), []string{"inventory", "character"}, "inventory")
+    registry.Register(NewGetInventoryTool(e), []string{"inventory", "character"}, "inventory")
+    registry.Register(NewEquipItemTool(e), []string{"inventory", "character"}, "inventory")
+    registry.Register(NewUnequipItemTool(e), []string{"inventory", "character"}, "inventory")
+    registry.Register(NewGetEquipmentTool(e), []string{"inventory", "character"}, "inventory")
+    registry.Register(NewAttuneItemTool(e), []string{"inventory", "character"}, "inventory")
+    registry.Register(NewTransferItemTool(e), []string{"inventory"}, "inventory")
+    registry.Register(NewAddCurrencyTool(e), []string{"inventory", "character"}, "inventory")
+
+    // 魔法物品Tools
+    registry.Register(NewUseMagicItemTool(e), []string{"inventory", "combat"}, "magic_item")
+    registry.Register(NewUnattuneItemTool(e), []string{"inventory"}, "magic_item")
+    registry.Register(NewRechargeMagicItemsTool(e), []string{"inventory"}, "magic_item")
+    registry.Register(NewGetMagicItemBonusTool(e), []string{"inventory", "rules"}, "magic_item")
+
+    // 专长系统Tools
+    registry.Register(NewSelectFeatTool(e), []string{"character"}, "feat")
+    registry.Register(NewListFeatsTool(e), []string{"character", "memory"}, "feat")
+    registry.Register(NewGetFeatDetailsTool(e), []string{"character", "memory"}, "feat")
+    registry.Register(NewRemoveFeatTool(e), []string{"character"}, "feat")
+    registry.Register(NewGetActorFeatsTool(e), []string{"character"}, "feat")
+
+    // 场景管理Tools
+    registry.Register(NewCreateSceneTool(e), []string{"narrative"}, "scene")
+    registry.Register(NewGetSceneTool(e), []string{"narrative", "main"}, "scene")
+    registry.Register(NewUpdateSceneTool(e), []string{"narrative"}, "scene")
+    registry.Register(NewDeleteSceneTool(e), []string{"narrative"}, "scene")
+    registry.Register(NewListScenesTool(e), []string{"narrative", "main"}, "scene")
+    registry.Register(NewSetCurrentSceneTool(e), []string{"narrative"}, "scene")
+    registry.Register(NewGetCurrentSceneTool(e), []string{"narrative", "main"}, "scene")
+    registry.Register(NewAddSceneConnectionTool(e), []string{"narrative"}, "scene")
+    registry.Register(NewRemoveSceneConnectionTool(e), []string{"narrative"}, "scene")
+    registry.Register(NewMoveActorToSceneTool(e), []string{"narrative"}, "scene")
+    registry.Register(NewGetSceneActorsTool(e), []string{"narrative", "main"}, "scene")
+    registry.Register(NewAddItemToSceneTool(e), []string{"narrative"}, "scene")
+    registry.Register(NewRemoveItemFromSceneTool(e), []string{"narrative"}, "scene")
+    registry.Register(NewGetSceneItemsTool(e), []string{"narrative"}, "scene")
+
+    // 探索系统Tools
+    registry.Register(NewStartTravelTool(e), []string{"narrative"}, "exploration")
+    registry.Register(NewAdvanceTravelTool(e), []string{"narrative"}, "exploration")
+    registry.Register(NewForageTool(e), []string{"narrative", "rules"}, "exploration")
+    registry.Register(NewNavigateTool(e), []string{"narrative", "rules"}, "exploration")
+
+    // 社交互动Tools
+    registry.Register(NewInteractWithNPCTool(e), []string{"npc"}, "social")
+    registry.Register(NewGetNPCAttitudeTool(e), []string{"npc"}, "social")
+
+    // 任务系统Tools
+    registry.Register(NewCreateQuestTool(e), []string{"memory"}, "quest")
+    registry.Register(NewGetQuestTool(e), []string{"memory", "main"}, "quest")
+    registry.Register(NewListQuestsTool(e), []string{"memory", "main"}, "quest")
+    registry.Register(NewAcceptQuestTool(e), []string{"memory"}, "quest")
+    registry.Register(NewUpdateQuestObjectiveTool(e), []string{"memory"}, "quest")
+    registry.Register(NewCompleteQuestTool(e), []string{"memory"}, "quest")
+    registry.Register(NewFailQuestTool(e), []string{"memory"}, "quest")
+    registry.Register(NewDeleteQuestTool(e), []string{"memory"}, "quest")
+    registry.Register(NewGetActorQuestsTool(e), []string{"memory", "main"}, "quest")
+    registry.Register(NewGetQuestGiverQuestsTool(e), []string{"memory", "npc"}, "quest")
+
+    // 制作系统Tools
+    registry.Register(NewStartCraftingTool(e), []string{"crafting"}, "crafting")
+    registry.Register(NewAdvanceCraftingTool(e), []string{"crafting"}, "crafting")
+    registry.Register(NewCompleteCraftingTool(e), []string{"crafting"}, "crafting")
+    registry.Register(NewGetCraftingRecipesTool(e), []string{"crafting", "memory"}, "crafting")
+
+    // 诅咒系统Tools
+    registry.Register(NewCurseActorTool(e), []string{"rules"}, "curse")
+    registry.Register(NewRemoveCurseTool(e), []string{"rules"}, "curse")
+    registry.Register(NewGetCursesTool(e), []string{"rules"}, "curse")
+
+    // 力竭系统Tools
+    registry.Register(NewApplyExhaustionTool(e), []string{"rules"}, "exhaustion")
+    registry.Register(NewRemoveExhaustionTool(e), []string{"rules"}, "exhaustion")
+    registry.Register(NewGetExhaustionStatusTool(e), []string{"rules"}, "exhaustion")
+
+    // 骑乘系统Tools
+    registry.Register(NewMountCreatureTool(e), []string{"mount"}, "mount")
+    registry.Register(NewDismountTool(e), []string{"mount"}, "mount")
+    registry.Register(NewCalculateMountSpeedTool(e), []string{"mount"}, "mount")
+
+    // 移动系统Tools
+    registry.Register(NewPerformJumpTool(e), []string{"movement"}, "movement")
+    registry.Register(NewApplyFallDamageTool(e), []string{"movement", "combat"}, "movement")
+    registry.Register(NewCalculateBreathHoldingTool(e), []string{"movement"}, "movement")
+    registry.Register(NewApplySuffocationTool(e), []string{"movement"}, "movement")
+    registry.Register(NewPerformEncounterCheckTool(e), []string{"movement", "narrative"}, "movement")
+
+    // 毒药系统Tools
+    registry.Register(NewApplyPoisonTool(e), []string{"rules"}, "poison")
+    registry.Register(NewResolvePoisonEffectTool(e), []string{"rules"}, "poison")
+    registry.Register(NewRemovePoisonTool(e), []string{"rules"}, "poison")
+
+    // 陷阱系统Tools
+    registry.Register(NewPlaceTrapTool(e), []string{"narrative"}, "trap")
+    registry.Register(NewDetectTrapTool(e), []string{"narrative", "rules"}, "trap")
+    registry.Register(NewDisarmTrapTool(e), []string{"narrative", "rules"}, "trap")
+    registry.Register(NewTriggerTrapTool(e), []string{"narrative", "combat"}, "trap")
+
+    // 骰子系统Tools
+    registry.Register(NewRollTool(e), []string{"rules"}, "dice")
+    registry.Register(NewRollAdvantageTool(e), []string{"rules"}, "dice")
+    registry.Register(NewRollDisadvantageTool(e), []string{"rules"}, "dice")
+    registry.Register(NewRollAbilityTool(e), []string{"rules"}, "dice")
+    registry.Register(NewRollHitDiceTool(e), []string{"character"}, "dice")
+
+    // 状态查询Tools
+    registry.Register(NewGetStateSummaryTool(e), []string{"memory", "main"}, "state")
+    registry.Register(NewGetActorSheetTool(e), []string{"memory", "character"}, "state")
+    registry.Register(NewGetCombatSummaryTool(e), []string{"memory", "combat"}, "state")
+
+    // 阶段管理Tools
+    registry.Register(NewSetPhaseTool(e), []string{"memory", "main"}, "phase")
+    registry.Register(NewGetPhaseTool(e), []string{"memory", "main"}, "phase")
+    registry.Register(NewGetAllowedOperationsTool(e), []string{"memory", "main"}, "phase")
+
+    // 信息聚合查询Tools
+    registry.Register(NewGetLifestyleInfoTool(e), []string{"character"}, "info")
+    registry.Register(NewGetCraftingInfoTool(e), []string{"crafting"}, "info")
+    registry.Register(NewGetCarryingCapacityTool(e), []string{"inventory"}, "info")
+    registry.Register(NewGetExhaustionEffectsTool(e), []string{"rules"}, "info")
+
+    // 数据查询Tools (由Data Query Agent统一处理)
+    // ListRaces, GetRace, ListClasses, GetClass, etc.
 
     return registry
 }

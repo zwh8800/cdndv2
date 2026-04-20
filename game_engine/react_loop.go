@@ -2,6 +2,7 @@ package gameengine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 
@@ -226,6 +227,11 @@ func (l *ReActLoop) observe(ctx context.Context) {
 	)
 	l.state.agentContext.History = l.state.History
 	l.state.agentContext.CurrentState = summary
+
+	// 从游戏状态摘要中预填充已知实体ID
+	if summary != nil {
+		l.populateKnownEntityIDsFromSummary(summary)
+	}
 
 	// 如果启用了Router，转入路由阶段；否则直接转入思考阶段
 	if l.useRouter {
@@ -612,6 +618,14 @@ func (l *ReActLoop) executeDelegationsSequential(ctx context.Context, calls []ag
 	for _, call := range calls {
 		result := l.executeSingleDelegation(ctx, call)
 		results[call.AgentName] = result
+
+		// 从执行结果中提取实体ID并注入到上下文中，供后续 SubAgent 使用
+		if result.Success && l.state.agentContext != nil {
+			entityIDs := extractEntityIDsFromResult(result)
+			if len(entityIDs) > 0 {
+				l.state.agentContext.MergeKnownEntityIDs(entityIDs)
+			}
+		}
 	}
 
 	return results
@@ -750,7 +764,7 @@ func (l *ReActLoop) createSubSession(parentCtx *agent.AgentContext) *agent.Agent
 	if parentCtx == nil {
 		return agent.NewAgentContext("", "", l.engine)
 	}
-	return &agent.AgentContext{
+	subCtx := &agent.AgentContext{
 		GameID:       parentCtx.GameID,
 		PlayerID:     parentCtx.PlayerID,
 		Engine:       parentCtx.Engine,
@@ -760,6 +774,131 @@ func (l *ReActLoop) createSubSession(parentCtx *agent.AgentContext) *agent.Agent
 		Parent:       parentCtx, // 链接父会话
 		IsSubSession: true,
 	}
+	// 继承父会话的已知实体ID，确保 SubAgent 间可以共享 actor_id、scene_id 等
+	if parentCtx.KnownEntityIDs != nil {
+		subCtx.KnownEntityIDs = make(map[string]string)
+		for k, v := range parentCtx.KnownEntityIDs {
+			subCtx.KnownEntityIDs[k] = v
+		}
+	}
+	return subCtx
+}
+
+// populateKnownEntityIDsFromSummary 从游戏状态摘要中提取已知实体ID
+func (l *ReActLoop) populateKnownEntityIDsFromSummary(summary *game_summary.GameSummary) {
+	if summary == nil || l.state.agentContext == nil {
+		return
+	}
+
+	// 提取场景ID
+	if summary.CurrentScene != nil && summary.CurrentScene.ID != "" {
+		l.state.agentContext.SetKnownEntityID("scene_id", string(summary.CurrentScene.ID))
+	}
+
+	// 提取玩家角色ID
+	if summary.Player != nil && summary.Player.ID != "" {
+		l.state.agentContext.SetKnownEntityID("actor_id", string(summary.Player.ID))
+	}
+}
+
+// extractEntityIDsFromResult 从 SubAgent 执行结果中提取实体ID
+// 解析 Content 中的 JSON 数据，查找 actor_id、scene_id 等关键字段
+func extractEntityIDsFromResult(result *agent.AgentCallResult) map[string]string {
+	entityIDs := make(map[string]string)
+
+	// 从 Content 中尝试提取 JSON
+	jsonContent := extractJSONFromString(result.Content)
+	if jsonContent == "" {
+		return entityIDs
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal([]byte(jsonContent), &data); err != nil {
+		return entityIDs
+	}
+
+	// 提取 actor_id
+	if id, ok := findFieldInJSON(data, "actor_id"); ok {
+		entityIDs["actor_id"] = id
+	}
+	// 提取 scene_id
+	if id, ok := findFieldInJSON(data, "scene_id"); ok {
+		entityIDs["scene_id"] = id
+	}
+	// 提取 actor_id 嵌套在 scene.actors 或 actor 中
+	if scene, ok := data["scene"].(map[string]any); ok {
+		if id, ok := scene["id"].(string); ok && id != "" {
+			entityIDs["scene_id"] = id
+		}
+	}
+
+	return entityIDs
+}
+
+// extractJSONFromString 从字符串中提取 JSON 对象
+func extractJSONFromString(s string) string {
+	start := -1
+	for i, c := range s {
+		if c == '{' {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return ""
+	}
+
+	depth := 0
+	for i := start; i < len(s); i++ {
+		if s[i] == '{' {
+			depth++
+		} else if s[i] == '}' {
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return ""
+}
+
+// findFieldInJSON 在 JSON 数据中递归查找指定字段
+func findFieldInJSON(data map[string]any, field string) (string, bool) {
+	if val, ok := data[field].(string); ok && val != "" {
+		return val, true
+	}
+	// 递归查找嵌套对象
+	for _, v := range data {
+		if nested, ok := v.(map[string]any); ok {
+			if val, ok := findFieldInJSON(nested, field); ok {
+				return val, true
+			}
+		}
+	}
+	return "", false
+}
+
+// formatKnownEntityIDs 格式化已知实体ID为可读文本，注入到 SubAgent system prompt
+func formatKnownEntityIDs(entityIDs map[string]string) string {
+	if len(entityIDs) == 0 {
+		return ""
+	}
+
+	var parts []string
+	parts = append(parts, "## 已知实体ID（重要：调用 API 时必须使用以下 ID）")
+	parts = append(parts, "")
+
+	if actorID, ok := entityIDs["actor_id"]; ok {
+		parts = append(parts, fmt.Sprintf("- **角色ID (actor_id)**: `%s`", actorID))
+	}
+	if sceneID, ok := entityIDs["scene_id"]; ok {
+		parts = append(parts, fmt.Sprintf("- **场景ID (scene_id)**: `%s`", sceneID))
+	}
+
+	parts = append(parts, "")
+	parts = append(parts, "**注意**: 在调用任何需要 actor_id 或 scene_id 的 API 时，必须使用上述 ID 值，不得使用角色名称或其他标识符。")
+
+	return joinStrings(parts, "\n")
 }
 
 // joinStrings 连接字符串切片

@@ -37,6 +37,12 @@ type AgentContext struct {
     History      []Message       // 对话历史
     CurrentState *StateSummary   // 当前状态摘要
     Metadata     map[string]any  // 扩展元数据
+
+    // SubAgent 执行相关
+    AgentResults   map[string]*AgentCallResult // SubAgent 执行结果
+    Parent         *AgentContext               // 父会话引用（SubAgent隔离用）
+    IsSubSession   bool                        // 是否为子会话
+    KnownEntityIDs map[string]string           // 已知实体ID映射（如 actor_id, scene_id 等），用于 SubAgent 间共享
 }
 
 // AgentRequest Agent请求

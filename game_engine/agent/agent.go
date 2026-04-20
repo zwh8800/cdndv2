@@ -52,9 +52,10 @@ type AgentContext struct {
 	Metadata     map[string]any            // 扩展元数据
 
 	// SubAgent 执行相关
-	AgentResults map[string]*AgentCallResult // SubAgent 执行结果
-	Parent       *AgentContext               // 父会话引用（SubAgent隔离用）
-	IsSubSession bool                        // 是否为子会话
+	AgentResults   map[string]*AgentCallResult // SubAgent 执行结果
+	Parent         *AgentContext               // 父会话引用（SubAgent隔离用）
+	IsSubSession   bool                        // 是否为子会话
+	KnownEntityIDs map[string]string            // 已知实体ID映射（如 actor_id, scene_id 等），用于 SubAgent 间共享
 }
 
 // AgentRequest Agent请求
@@ -215,4 +216,31 @@ func (c *AgentContext) HasAgentResults() bool {
 // ClearAgentResults 清除 SubAgent 结果
 func (c *AgentContext) ClearAgentResults() {
 	c.AgentResults = nil
+}
+
+// SetKnownEntityID 设置已知实体ID
+func (c *AgentContext) SetKnownEntityID(entityType, entityID string) {
+	if c.KnownEntityIDs == nil {
+		c.KnownEntityIDs = make(map[string]string)
+	}
+	c.KnownEntityIDs[entityType] = entityID
+}
+
+// GetKnownEntityID 获取已知实体ID
+func (c *AgentContext) GetKnownEntityID(entityType string) (string, bool) {
+	if c.KnownEntityIDs == nil {
+		return "", false
+	}
+	id, ok := c.KnownEntityIDs[entityType]
+	return id, ok
+}
+
+// MergeKnownEntityIDs 合并已知实体ID（从其他上下文或结果中）
+func (c *AgentContext) MergeKnownEntityIDs(other map[string]string) {
+	if c.KnownEntityIDs == nil {
+		c.KnownEntityIDs = make(map[string]string)
+	}
+	for k, v := range other {
+		c.KnownEntityIDs[k] = v
+	}
 }

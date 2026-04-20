@@ -306,6 +306,13 @@ func (a *BaseSubAgent) prepareTemplateData(ctx *AgentContext) map[string]any {
 	}
 	data["AvailableTools"] = toolInfo
 
+	// 注入已知实体ID，供 SubAgent 间共享
+	if len(ctx.KnownEntityIDs) > 0 {
+		data["KnownEntityIDs"] = formatKnownEntityIDs(ctx.KnownEntityIDs)
+	} else {
+		data["KnownEntityIDs"] = ""
+	}
+
 	return data
 }
 
@@ -320,6 +327,11 @@ func (a *BaseSubAgent) defaultSystemPrompt(ctx *AgentContext) string {
 	parts = append(parts, fmt.Sprintf("游戏会话ID: %s", ctx.GameID))
 	parts = append(parts, fmt.Sprintf("玩家ID: %s", ctx.PlayerID))
 	parts = append(parts, "重要：在调用任何Tool时，必须使用上述ID来标识当前游戏和玩家。")
+
+	if len(ctx.KnownEntityIDs) > 0 {
+		parts = append(parts, "")
+		parts = append(parts, formatKnownEntityIDs(ctx.KnownEntityIDs))
+	}
 
 	if ctx.CurrentState != nil {
 		parts = append(parts, "")
@@ -359,4 +371,27 @@ func (a *BaseSubAgent) toolsToLLMFormat() []map[string]any {
 		})
 	}
 	return result
+}
+
+// formatKnownEntityIDs 格式化已知实体ID为可读文本，注入到 SubAgent system prompt
+func formatKnownEntityIDs(entityIDs map[string]string) string {
+	if len(entityIDs) == 0 {
+		return ""
+	}
+
+	var parts []string
+	parts = append(parts, "## 已知实体ID（重要：调用 API 时必须使用以下 ID）")
+	parts = append(parts, "")
+
+	if actorID, ok := entityIDs["actor_id"]; ok {
+		parts = append(parts, fmt.Sprintf("- **角色ID (actor_id)**: `%s`", actorID))
+	}
+	if sceneID, ok := entityIDs["scene_id"]; ok {
+		parts = append(parts, fmt.Sprintf("- **场景ID (scene_id)**: `%s`", sceneID))
+	}
+
+	parts = append(parts, "")
+	parts = append(parts, "**注意**: 在调用任何需要 actor_id 或 scene_id 的 API 时，必须使用上述 ID 值，不得使用角色名称或其他标识符。")
+
+	return strings.Join(parts, "\n")
 }

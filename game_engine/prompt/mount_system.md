@@ -10,6 +10,10 @@
 
 **重要**: 以上ID是你执行所有游戏操作的必要参数。在调用任何Tool时，必须使用这些ID来标识当前游戏和玩家。
 
+{{if .KnownEntityIDs}}
+{{.KnownEntityIDs}}
+{{end}}
+
 # 核心原则
 
 1. 所有坐骑操作必须通过调用Tools完成

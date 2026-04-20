@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/zwh8800/dnd-core/pkg/engine"
 	"github.com/zwh8800/dnd-core/pkg/model"
@@ -26,6 +27,9 @@ type EngineConfig struct {
 
 	// 最大迭代次数
 	MaxIterations int
+
+	// 单次 ProcessInput 请求超时时间（默认 3 分钟）
+	RequestTimeout time.Duration
 
 	// OpenAI API密钥（如果LLMConfig中没有设置）
 	OpenAIAPIKey string
@@ -115,6 +119,12 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	if maxIter == 0 {
 		maxIter = 10
 	}
+
+	requestTimeout := cfg.RequestTimeout
+	if requestTimeout == 0 {
+		requestTimeout = 3 * time.Minute
+	}
+	cfg.RequestTimeout = requestTimeout // 确保 EngineConfig 中也保存了实际使用的值
 
 	reactLoop := NewReActLoop(
 		dndEngine,
@@ -226,15 +236,34 @@ func (ge *GameEngine) LoadGame(ctx context.Context, gameID model.ID) (*GameSessi
 
 // ProcessInput 处理玩家输入
 func (ge *GameEngine) ProcessInput(ctx context.Context, session *GameSession, input string) (string, error) {
+	// 保存历史长度，用于出错时回滚
+	historyLenBefore := len(session.reactLoop.state.History)
+
 	// 添加玩家输入到历史
 	session.reactLoop.state.History = append(
 		session.reactLoop.state.History,
 		llm.NewUserMessage(input),
 	)
 
+	// 为本次请求设置超时，防止单次输入无限挂起
+	timeout := ge.config.RequestTimeout
+	if timeout == 0 {
+		timeout = 3 * time.Minute
+	}
+	processCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ge.logger.Info("ProcessInput starting",
+		zap.String("input", input),
+		zap.Duration("timeout", timeout),
+		zap.Int("historyLenBefore", historyLenBefore),
+	)
+
 	// 执行ReAct循环
-	err := session.reactLoop.Run(ctx, input, session.ID, session.PlayerID)
+	err := session.reactLoop.Run(processCtx, input, session.ID, session.PlayerID)
 	if err != nil {
+		// 回滚历史到本次输入之前的状态，避免残留的中间消息影响后续调用
+		session.reactLoop.state.History = session.reactLoop.state.History[:historyLenBefore]
 		return "", err
 	}
 

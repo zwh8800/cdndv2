@@ -29,15 +29,19 @@ const (
 	PhaseEnd
 )
 
+// maxDelegationsPerRun 每次 ReAct 循环最大委托次数
+const maxDelegationsPerRun = 10
+
 // LoopState 循环状态
 type LoopState struct {
-	GameID       model.ID
-	PlayerID     model.ID
-	History      []llm.Message
-	CurrentPhase Phase
-	Iteration    int
-	LastResult   *agent.AgentResponse
-	agentContext *agent.AgentContext
+	GameID          model.ID
+	PlayerID        model.ID
+	History         []llm.Message
+	CurrentPhase    Phase
+	Iteration       int
+	LastResult      *agent.AgentResponse
+	agentContext    *agent.AgentContext
+	delegationCount int
 }
 
 // ReActLoop ReAct循环控制器
@@ -104,6 +108,7 @@ func (l *ReActLoop) Run(ctx context.Context, initialInput string, gameID, player
 	l.state.PlayerID = playerID
 	l.state.Iteration = 0
 	l.state.CurrentPhase = PhaseObserve
+	l.state.delegationCount = 0
 
 	log.Debug("ReAct Loop started",
 		zap.String("gameID", string(gameID)),
@@ -271,6 +276,15 @@ func (l *ReActLoop) route(ctx context.Context) {
 
 	// 如果有目标Agent，执行委托
 	if len(decision.TargetAgents) > 0 {
+		l.state.delegationCount++
+		if l.state.delegationCount > maxDelegationsPerRun {
+			log.Warn("Max delegations reached in route phase, skipping further delegations",
+				zap.Int("delegationCount", l.state.delegationCount),
+			)
+			l.state.CurrentPhase = PhaseThink
+			return
+		}
+
 		// 转换为SubAgentCall格式
 		calls := make([]agent.SubAgentCall, 0, len(decision.TargetAgents))
 		for _, t := range decision.TargetAgents {
@@ -379,58 +393,6 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 		return PhaseWait
 	}
 
-	// 处理Tool调用
-	if len(result.ToolCalls) > 0 {
-		log.Debug("Executing tool calls",
-			zap.Int("count", len(result.ToolCalls)),
-		)
-
-		for i, tc := range result.ToolCalls {
-			argsJSON := formatArgs(tc.Arguments)
-			log.Debug("Tool call",
-				zap.Int("index", i),
-				zap.String("toolName", tc.Name),
-				zap.String("toolCallID", tc.ID),
-				zap.Any("arguments", argsJSON),
-			)
-		}
-
-		// 先将 assistant 消息（包含 tool_calls）加入历史
-		// OpenAI function calling 格式要求：assistant 消息在前，tool result 消息在后
-		l.state.History = append(l.state.History, llm.NewAssistantMessage("", result.ToolCalls))
-		log.Debug("Assistant tool call message added to history",
-			zap.Int("toolCallCount", len(result.ToolCalls)),
-		)
-
-		toolResults := l.executeTools(ctx, result.ToolCalls)
-
-		// 将 tool 结果添加到历史
-		for _, tr := range toolResults {
-			l.state.History = append(l.state.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
-			log.Debug("Tool result added to history",
-				zap.String("toolCallID", tr.ToolCallID),
-				zap.Bool("isError", tr.IsError),
-				zap.String("content", truncateString(tr.Content, 100)),
-			)
-		}
-
-		// 同步 agentContext.History，确保下一轮 LLM 能看到 tool 结果
-		if l.state.agentContext != nil {
-			l.state.agentContext.History = l.state.History
-		}
-
-		return PhaseThink // 继续思考
-	}
-
-	// 处理内容输出（ActionDelegate 由其分支内以 tool_call 格式添加，避免重复）
-	if result.Content != "" && result.NextAction != agent.ActionDelegate {
-		l.state.History = append(l.state.History, llm.NewAssistantMessage(result.Content, nil))
-		log.Debug("Assistant message added to history",
-			zap.String("content", truncateString(result.Content, 200)),
-		)
-	}
-
-	// 根据下一步动作决定
 	switch result.NextAction {
 	case agent.ActionDelegate:
 		log.Debug("Action: Delegate",
@@ -486,7 +448,65 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 			l.state.agentContext.History = l.state.History
 		}
 
-		return PhaseThink // 主Agent继续思考
+		l.state.delegationCount++
+		if l.state.delegationCount >= maxDelegationsPerRun {
+			log.Debug("Max delegations reached, forcing response",
+				zap.Int("delegationCount", l.state.delegationCount),
+				zap.Int("maxDelegations", maxDelegationsPerRun),
+			)
+			return PhaseSynthesize
+		}
+
+		return PhaseThink
+
+	case agent.ActionContinue:
+		// 纯只读工具调用（无委托）
+		if len(result.ToolCalls) > 0 {
+			log.Debug("Executing tool calls",
+				zap.Int("count", len(result.ToolCalls)),
+			)
+
+			for i, tc := range result.ToolCalls {
+				argsJSON := formatArgs(tc.Arguments)
+				log.Debug("Tool call",
+					zap.Int("index", i),
+					zap.String("toolName", tc.Name),
+					zap.String("toolCallID", tc.ID),
+					zap.Any("arguments", argsJSON),
+				)
+			}
+
+			l.state.History = append(l.state.History, llm.NewAssistantMessage("", result.ToolCalls))
+			log.Debug("Assistant tool call message added to history",
+				zap.Int("toolCallCount", len(result.ToolCalls)),
+			)
+
+			toolResults := l.executeTools(ctx, result.ToolCalls)
+
+			for _, tr := range toolResults {
+				l.state.History = append(l.state.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
+				log.Debug("Tool result added to history",
+					zap.String("toolCallID", tr.ToolCallID),
+					zap.Bool("isError", tr.IsError),
+					zap.String("content", truncateString(tr.Content, 100)),
+				)
+			}
+
+			if l.state.agentContext != nil {
+				l.state.agentContext.History = l.state.History
+			}
+
+			return PhaseThink
+		}
+
+		// 无工具调用但有内容，视为响应
+		if result.Content != "" {
+			l.state.History = append(l.state.History, llm.NewAssistantMessage(result.Content, nil))
+			log.Debug("Assistant message added to history",
+				zap.String("content", truncateString(result.Content, 200)),
+			)
+		}
+		return PhaseWait
 
 	case agent.ActionSynthesize:
 		log.Debug("Action: Synthesize")
@@ -494,17 +514,29 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 
 	case agent.ActionWaitForInput:
 		log.Debug("Action: WaitForInput")
+		if result.Content != "" {
+			l.state.History = append(l.state.History, llm.NewAssistantMessage(result.Content, nil))
+		}
 		return PhaseWait
 	case agent.ActionEndGame:
 		log.Debug("Action: EndGame")
+		if result.Content != "" {
+			l.state.History = append(l.state.History, llm.NewAssistantMessage(result.Content, nil))
+		}
 		return PhaseEnd
 	case agent.ActionRespondToPlayer:
 		log.Debug("Action: RespondToPlayer",
 			zap.String("content", truncateString(result.Content, 200)),
 		)
+		if result.Content != "" {
+			l.state.History = append(l.state.History, llm.NewAssistantMessage(result.Content, nil))
+		}
 		return PhaseWait
 	default:
 		log.Debug("Action: default (WaitForInput)")
+		if result.Content != "" {
+			l.state.History = append(l.state.History, llm.NewAssistantMessage(result.Content, nil))
+		}
 		return PhaseWait
 	}
 }

@@ -95,6 +95,13 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	registerAgentTools(registry, dndEngine)
 	subAgents := createSubAgents(registry, llmClient)
 
+	// 为子Agent设置日志器
+	for _, sa := range subAgents {
+		if sl, ok := sa.(interface{ SetLogger(*zap.Logger) }); ok {
+			sl.SetLogger(logger)
+		}
+	}
+
 	// 创建路由Agent
 	router := createRouter(llmClient, subAgents)
 	router.SetLogger(logger)

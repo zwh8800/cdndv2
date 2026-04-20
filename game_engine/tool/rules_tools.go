@@ -60,29 +60,37 @@ func NewPerformAbilityCheckTool(e *engine.Engine) *PerformAbilityCheckTool {
 func (t *PerformAbilityCheckTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
-	ability := model.Ability(params["ability"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	abilityStr, err := RequireString(params, "ability")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
+	ability := model.Ability(abilityStr)
 
 	req := engine.AbilityCheckRequest{
 		GameID:  gameID,
 		ActorID: actorID,
 		Ability: ability,
+		DC:      OptionalInt(params, "dc", 0),
+		Reason:  OptionalString(params, "reason", ""),
 	}
 
-	if dc, ok := params["dc"].(float64); ok {
-		req.DC = int(dc)
-	}
-	if adv, ok := params["advantage"].(string); ok {
-		switch adv {
-		case "advantage":
-			req.Advantage = model.RollModifier{Advantage: true}
-		case "disadvantage":
-			req.Advantage = model.RollModifier{Disadvantage: true}
-		}
-	}
-	if reason, ok := params["reason"].(string); ok {
-		req.Reason = reason
+	adv := OptionalString(params, "advantage", "none")
+	switch adv {
+	case "advantage":
+		req.Advantage = model.RollModifier{Advantage: true}
+	case "disadvantage":
+		req.Advantage = model.RollModifier{Disadvantage: true}
 	}
 
 	result, err := e.PerformAbilityCheck(ctx, req)
@@ -153,26 +161,36 @@ func NewPerformSkillCheckTool(e *engine.Engine) *PerformSkillCheckTool {
 func (t *PerformSkillCheckTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
-	skill := model.Skill(params["skill"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	skillStr, err := RequireString(params, "skill")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
+	skill := model.Skill(skillStr)
 
 	req := engine.SkillCheckRequest{
 		GameID:  gameID,
 		ActorID: actorID,
 		Skill:   skill,
+		DC:      OptionalInt(params, "dc", 0),
 	}
 
-	if dc, ok := params["dc"].(float64); ok {
-		req.DC = int(dc)
-	}
-	if adv, ok := params["advantage"].(string); ok {
-		switch adv {
-		case "advantage":
-			req.Advantage = model.RollModifier{Advantage: true}
-		case "disadvantage":
-			req.Advantage = model.RollModifier{Disadvantage: true}
-		}
+	adv := OptionalString(params, "advantage", "none")
+	switch adv {
+	case "advantage":
+		req.Advantage = model.RollModifier{Advantage: true}
+	case "disadvantage":
+		req.Advantage = model.RollModifier{Disadvantage: true}
 	}
 
 	result, err := e.PerformSkillCheck(ctx, req)
@@ -238,10 +256,26 @@ func NewPerformSavingThrowTool(e *engine.Engine) *PerformSavingThrowTool {
 func (t *PerformSavingThrowTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
-	ability := model.Ability(params["ability"].(string))
-	dc := int(params["dc"].(float64))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	abilityStr, err := RequireString(params, "ability")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	dc, err := RequireInt(params, "dc")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
+	ability := model.Ability(abilityStr)
 
 	req := engine.SavingThrowRequest{
 		GameID:  gameID,
@@ -250,13 +284,12 @@ func (t *PerformSavingThrowTool) Execute(ctx context.Context, params map[string]
 		DC:      dc,
 	}
 
-	if adv, ok := params["advantage"].(string); ok {
-		switch adv {
-		case "advantage":
-			req.Advantage = model.RollModifier{Advantage: true}
-		case "disadvantage":
-			req.Advantage = model.RollModifier{Disadvantage: true}
-		}
+	adv := OptionalString(params, "advantage", "none")
+	switch adv {
+	case "advantage":
+		req.Advantage = model.RollModifier{Advantage: true}
+	case "disadvantage":
+		req.Advantage = model.RollModifier{Disadvantage: true}
 	}
 
 	result, err := e.PerformSavingThrow(ctx, req)
@@ -307,8 +340,17 @@ func NewGetPassivePerceptionTool(e *engine.Engine) *GetPassivePerceptionTool {
 func (t *GetPassivePerceptionTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
 
 	req := engine.GetPassivePerceptionRequest{
 		GameID:  gameID,
@@ -366,13 +408,21 @@ func NewShortRestTool(e *engine.Engine) *ShortRestTool {
 func (t *ShortRestTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-
-	actorIDs := params["actor_ids"].([]any)
-	aids := make([]model.ID, len(actorIDs))
-	for i, aid := range actorIDs {
-		aids[i] = model.ID(aid.(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
 	}
+
+	actorStrs, err := RequireStringArray(params, "actor_ids")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	aids := make([]model.ID, len(actorStrs))
+	for i, aid := range actorStrs {
+		aids[i] = model.ID(aid)
+	}
+
+	gameID := model.ID(gameIDStr)
 
 	req := engine.ShortRestRequest{
 		GameID:   gameID,
@@ -441,22 +491,32 @@ func NewCastSpellTool(e *engine.Engine) *CastSpellTool {
 func (t *CastSpellTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	casterID := model.ID(params["caster_id"].(string))
-	spellID := params["spell_id"].(string)
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	casterIDStr, err := RequireString(params, "caster_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	spellID, err := RequireString(params, "spell_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	casterID := model.ID(casterIDStr)
 
 	spell := engine.SpellInput{
-		SpellID: spellID,
+		SpellID:   spellID,
+		SlotLevel: OptionalInt(params, "slot_level", 0),
 	}
 
-	if sl, ok := params["slot_level"].(float64); ok {
-		spell.SlotLevel = int(sl)
-	}
-
-	if tids, ok := params["target_ids"].([]any); ok {
-		spell.TargetIDs = make([]model.ID, len(tids))
-		for i, tid := range tids {
-			spell.TargetIDs[i] = model.ID(tid.(string))
+	targetStrs := OptionalStringArray(params, "target_ids")
+	if len(targetStrs) > 0 {
+		spell.TargetIDs = make([]model.ID, len(targetStrs))
+		for i, tid := range targetStrs {
+			spell.TargetIDs[i] = model.ID(tid)
 		}
 	}
 
@@ -514,8 +574,17 @@ func NewGetSpellSlotsTool(e *engine.Engine) *GetSpellSlotsTool {
 func (t *GetSpellSlotsTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	casterID := model.ID(params["caster_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	casterIDStr, err := RequireString(params, "caster_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	casterID := model.ID(casterIDStr)
 
 	req := engine.GetSpellSlotsRequest{
 		GameID:   gameID,
@@ -575,22 +644,30 @@ func NewPrepareSpellsTool(e *engine.Engine) *PrepareSpellsTool {
 func (t *PrepareSpellsTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	casterID := model.ID(params["caster_id"].(string))
-
-	spellIDs := params["spell_ids"].([]any)
-	sids := make([]string, len(spellIDs))
-	for i, sid := range spellIDs {
-		sids[i] = sid.(string)
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
 	}
+	casterIDStr, err := RequireString(params, "caster_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	spellIDs, err := RequireStringArray(params, "spell_ids")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	casterID := model.ID(casterIDStr)
 
 	req := engine.PrepareSpellsRequest{
 		GameID:   gameID,
 		CasterID: casterID,
-		SpellIDs: sids,
+		SpellIDs: spellIDs,
 	}
 
-	err := e.PrepareSpells(ctx, req)
+	err = e.PrepareSpells(ctx, req)
 	if err != nil {
 		return &ToolResult{
 			Success: false,
@@ -641,9 +718,21 @@ func NewLearnSpellTool(e *engine.Engine) *LearnSpellTool {
 func (t *LearnSpellTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	casterID := model.ID(params["caster_id"].(string))
-	spellID := params["spell_id"].(string)
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	casterIDStr, err := RequireString(params, "caster_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	spellID, err := RequireString(params, "spell_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	casterID := model.ID(casterIDStr)
 
 	req := engine.LearnSpellRequest{
 		GameID:   gameID,
@@ -651,7 +740,7 @@ func (t *LearnSpellTool) Execute(ctx context.Context, params map[string]any) (*T
 		SpellID:  spellID,
 	}
 
-	err := e.LearnSpell(ctx, req)
+	err = e.LearnSpell(ctx, req)
 	if err != nil {
 		return &ToolResult{
 			Success: false,
@@ -702,9 +791,21 @@ func NewConcentrationCheckTool(e *engine.Engine) *ConcentrationCheckTool {
 func (t *ConcentrationCheckTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	casterID := model.ID(params["caster_id"].(string))
-	damageTaken := int(params["damage_taken"].(float64))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	casterIDStr, err := RequireString(params, "caster_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	damageTaken, err := RequireInt(params, "damage_taken")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	casterID := model.ID(casterIDStr)
 
 	req := engine.ConcentrationCheckRequest{
 		GameID:      gameID,
@@ -760,15 +861,24 @@ func NewEndConcentrationTool(e *engine.Engine) *EndConcentrationTool {
 func (t *EndConcentrationTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	casterID := model.ID(params["caster_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	casterIDStr, err := RequireString(params, "caster_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	casterID := model.ID(casterIDStr)
 
 	req := engine.EndConcentrationRequest{
 		GameID:   gameID,
 		CasterID: casterID,
 	}
 
-	err := e.EndConcentration(ctx, req)
+	err = e.EndConcentration(ctx, req)
 	if err != nil {
 		return &ToolResult{
 			Success: false,
@@ -816,13 +926,21 @@ func NewStartLongRestTool(e *engine.Engine) *StartLongRestTool {
 func (t *StartLongRestTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-
-	actorIDs := params["actor_ids"].([]any)
-	aids := make([]model.ID, len(actorIDs))
-	for i, aid := range actorIDs {
-		aids[i] = model.ID(aid.(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
 	}
+
+	actorStrs, err := RequireStringArray(params, "actor_ids")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	aids := make([]model.ID, len(actorStrs))
+	for i, aid := range actorStrs {
+		aids[i] = model.ID(aid)
+	}
+
+	gameID := model.ID(gameIDStr)
 
 	req := engine.StartLongRestRequest{
 		GameID:   gameID,
@@ -873,7 +991,12 @@ func NewEndLongRestTool(e *engine.Engine) *EndLongRestTool {
 func (t *EndLongRestTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
 
 	req := engine.EndLongRestRequest{
 		GameID: gameID,

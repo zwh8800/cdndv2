@@ -58,6 +58,124 @@ func registerAgentTools(registry *tool.ToolRegistry, engine *engine.Engine) {
 	// 只读 - MainAgent + SubAgent
 	registry.Register(tool.NewGetPassivePerceptionTool(engine), []string{agent.SubAgentNameRules, agent.MainAgentName}, "check")
 	registry.Register(tool.NewGetSpellSlotsTool(engine), []string{agent.SubAgentNameRules, agent.MainAgentName}, "spell")
+
+	// ========== 库存管理工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewAddItemTool(engine), []string{agent.SubAgentNameInventory}, "inventory")
+	registry.Register(tool.NewRemoveItemTool(engine), []string{agent.SubAgentNameInventory}, "inventory")
+	registry.Register(tool.NewEquipItemTool(engine), []string{agent.SubAgentNameInventory}, "inventory")
+	registry.Register(tool.NewUnequipItemTool(engine), []string{agent.SubAgentNameInventory}, "inventory")
+	registry.Register(tool.NewTransferItemTool(engine), []string{agent.SubAgentNameInventory}, "inventory")
+	registry.Register(tool.NewAttuneItemTool(engine), []string{agent.SubAgentNameInventory}, "inventory")
+	registry.Register(tool.NewAddCurrencyTool(engine), []string{agent.SubAgentNameInventory}, "inventory")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewGetInventoryTool(engine), []string{agent.SubAgentNameInventory, agent.MainAgentName}, "inventory")
+	registry.Register(tool.NewGetEquipmentTool(engine), []string{agent.SubAgentNameInventory, agent.MainAgentName}, "inventory")
+
+	// ========== 魔法物品工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewUseMagicItemTool(engine), []string{agent.SubAgentNameInventory}, "magic_item")
+	registry.Register(tool.NewUnattuneItemTool(engine), []string{agent.SubAgentNameInventory}, "magic_item")
+	registry.Register(tool.NewRechargeMagicItemsTool(engine), []string{agent.SubAgentNameInventory}, "magic_item")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewGetMagicItemBonusTool(engine), []string{agent.SubAgentNameInventory, agent.MainAgentName}, "magic_item")
+
+	// ========== 叙事与场景工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewCreateSceneTool(engine), []string{agent.SubAgentNameNarrative}, "scene")
+	registry.Register(tool.NewUpdateSceneTool(engine), []string{agent.SubAgentNameNarrative}, "scene")
+	registry.Register(tool.NewDeleteSceneTool(engine), []string{agent.SubAgentNameNarrative}, "scene")
+	registry.Register(tool.NewSetCurrentSceneTool(engine), []string{agent.SubAgentNameNarrative}, "scene")
+	registry.Register(tool.NewAddSceneConnectionTool(engine), []string{agent.SubAgentNameNarrative}, "scene")
+	registry.Register(tool.NewRemoveSceneConnectionTool(engine), []string{agent.SubAgentNameNarrative}, "scene")
+	registry.Register(tool.NewMoveActorToSceneTool(engine), []string{agent.SubAgentNameNarrative}, "scene")
+	registry.Register(tool.NewAddItemToSceneTool(engine), []string{agent.SubAgentNameNarrative}, "scene")
+	registry.Register(tool.NewRemoveItemFromSceneTool(engine), []string{agent.SubAgentNameNarrative}, "scene")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewGetSceneTool(engine), []string{agent.SubAgentNameNarrative, agent.MainAgentName}, "scene")
+	registry.Register(tool.NewListScenesTool(engine), []string{agent.SubAgentNameNarrative, agent.MainAgentName}, "scene")
+	registry.Register(tool.NewGetCurrentSceneTool(engine), []string{agent.SubAgentNameNarrative, agent.MainAgentName}, "scene")
+	registry.Register(tool.NewGetSceneActorsTool(engine), []string{agent.SubAgentNameNarrative, agent.MainAgentName}, "scene")
+	registry.Register(tool.NewGetSceneItemsTool(engine), []string{agent.SubAgentNameNarrative, agent.MainAgentName}, "scene")
+
+	// ========== 探索工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewStartTravelTool(engine), []string{agent.SubAgentNameNarrative}, "exploration")
+	registry.Register(tool.NewAdvanceTravelTool(engine), []string{agent.SubAgentNameNarrative}, "exploration")
+	registry.Register(tool.NewForageTool(engine), []string{agent.SubAgentNameNarrative}, "exploration")
+	registry.Register(tool.NewNavigateTool(engine), []string{agent.SubAgentNameNarrative}, "exploration")
+
+	// ========== 陷阱工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewPlaceTrapTool(engine), []string{agent.SubAgentNameNarrative}, "trap")
+	registry.Register(tool.NewDetectTrapTool(engine), []string{agent.SubAgentNameNarrative}, "trap")
+	registry.Register(tool.NewDisarmTrapTool(engine), []string{agent.SubAgentNameNarrative}, "trap")
+	registry.Register(tool.NewTriggerTrapTool(engine), []string{agent.SubAgentNameNarrative}, "trap")
+
+	// ========== 社交互动工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewInteractWithNPCTool(engine), []string{agent.SubAgentNameNPC}, "social")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewGetNPCAttitudeTool(engine), []string{agent.SubAgentNameNPC, agent.MainAgentName}, "social")
+
+	// ========== 任务管理工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewCreateQuestTool(engine), []string{agent.SubAgentNameMemory}, "quest")
+	registry.Register(tool.NewAcceptQuestTool(engine), []string{agent.SubAgentNameMemory}, "quest")
+	registry.Register(tool.NewUpdateQuestObjectiveTool(engine), []string{agent.SubAgentNameMemory}, "quest")
+	registry.Register(tool.NewCompleteQuestTool(engine), []string{agent.SubAgentNameMemory}, "quest")
+	registry.Register(tool.NewFailQuestTool(engine), []string{agent.SubAgentNameMemory}, "quest")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewGetQuestTool(engine), []string{agent.SubAgentNameMemory, agent.MainAgentName}, "quest")
+	registry.Register(tool.NewListQuestsTool(engine), []string{agent.SubAgentNameMemory, agent.MainAgentName}, "quest")
+	registry.Register(tool.NewGetActorQuestsTool(engine), []string{agent.SubAgentNameMemory, agent.MainAgentName}, "quest")
+
+	// ========== 生活方式与时间工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewSetLifestyleTool(engine), []string{agent.SubAgentNameMemory}, "lifestyle")
+	registry.Register(tool.NewAdvanceGameTimeTool(engine), []string{agent.SubAgentNameMemory}, "lifestyle")
+
+	// ========== 移动工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewPerformJumpTool(engine), []string{agent.SubAgentNameMovement}, "movement")
+	registry.Register(tool.NewApplyFallDamageTool(engine), []string{agent.SubAgentNameMovement}, "movement")
+	registry.Register(tool.NewApplySuffocationTool(engine), []string{agent.SubAgentNameMovement}, "movement")
+	registry.Register(tool.NewPerformEncounterCheckTool(engine), []string{agent.SubAgentNameMovement}, "movement")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewCalculateBreathHoldingTool(engine), []string{agent.SubAgentNameMovement, agent.MainAgentName}, "movement")
+
+	// ========== 坐骑工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewMountCreatureTool(engine), []string{agent.SubAgentNameMount}, "mount")
+	registry.Register(tool.NewDismountTool(engine), []string{agent.SubAgentNameMount}, "mount")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewCalculateMountSpeedTool(engine), []string{agent.SubAgentNameMount, agent.MainAgentName}, "mount")
+
+	// ========== 制作工具 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewStartCraftingTool(engine), []string{agent.SubAgentNameCrafting}, "crafting")
+	registry.Register(tool.NewAdvanceCraftingTool(engine), []string{agent.SubAgentNameCrafting}, "crafting")
+	registry.Register(tool.NewCompleteCraftingTool(engine), []string{agent.SubAgentNameCrafting}, "crafting")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewGetCraftingRecipesTool(engine), []string{agent.SubAgentNameCrafting, agent.MainAgentName}, "crafting")
+
+	// ========== 数据查询工具 ==========
+	// 只读 - Data Query Agent + MainAgent
+	registry.Register(tool.NewListRacesTool(engine), []string{agent.SubAgentNameDataQuery, agent.SubAgentNameCharacter, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewGetRaceTool(engine), []string{agent.SubAgentNameDataQuery, agent.SubAgentNameCharacter, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewListClassesTool(engine), []string{agent.SubAgentNameDataQuery, agent.SubAgentNameCharacter, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewGetClassTool(engine), []string{agent.SubAgentNameDataQuery, agent.SubAgentNameCharacter, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewListBackgroundsTool(engine), []string{agent.SubAgentNameDataQuery, agent.SubAgentNameCharacter, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewGetBackgroundTool(engine), []string{agent.SubAgentNameDataQuery, agent.SubAgentNameCharacter, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewListMonstersTool(engine), []string{agent.SubAgentNameDataQuery, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewGetMonsterTool(engine), []string{agent.SubAgentNameDataQuery, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewListSpellsTool(engine), []string{agent.SubAgentNameDataQuery, agent.SubAgentNameRules, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewGetSpellTool(engine), []string{agent.SubAgentNameDataQuery, agent.SubAgentNameRules, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewListWeaponsTool(engine), []string{agent.SubAgentNameDataQuery, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewListArmorsTool(engine), []string{agent.SubAgentNameDataQuery, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewListMagicItemsTool(engine), []string{agent.SubAgentNameDataQuery, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewListFeatsDataTool(engine), []string{agent.SubAgentNameDataQuery, agent.MainAgentName}, "data_query")
+	registry.Register(tool.NewGetFeatDataTool(engine), []string{agent.SubAgentNameDataQuery, agent.MainAgentName}, "data_query")
 }
 
 // createSubAgents 创建子Agent
@@ -67,6 +185,14 @@ func createSubAgents(registry *tool.ToolRegistry, llmClient llm.LLMClient) map[s
 		agent.SubAgentNameCharacter: agent.NewCharacterAgent(registry, llmClient),
 		agent.SubAgentNameCombat:    agent.NewCombatAgent(registry, llmClient),
 		agent.SubAgentNameRules:     agent.NewRulesAgent(registry, llmClient),
+		agent.SubAgentNameInventory: agent.NewInventoryAgent(registry, llmClient),
+		agent.SubAgentNameNarrative: agent.NewNarrativeAgent(registry, llmClient),
+		agent.SubAgentNameNPC:       agent.NewNPCAgent(registry, llmClient),
+		agent.SubAgentNameMemory:    agent.NewMemoryAgent(registry, llmClient),
+		agent.SubAgentNameMovement:  agent.NewMovementAgent(registry, llmClient),
+		agent.SubAgentNameMount:     agent.NewMountAgent(registry, llmClient),
+		agent.SubAgentNameCrafting:  agent.NewCraftingAgent(registry, llmClient),
+		agent.SubAgentNameDataQuery: agent.NewDataQueryAgent(registry, llmClient),
 	}
 }
 

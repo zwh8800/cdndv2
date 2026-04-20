@@ -75,30 +75,42 @@ func NewCreatePCTool(e *engine.Engine) *CreatePCTool {
 func (t *CreatePCTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	name := params["name"].(string)
-	race := params["race"].(string)
-	class := params["class"].(string)
-
-	level := 1
-	if l, ok := params["level"].(float64); ok {
-		level = int(l)
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	name, err := RequireString(params, "name")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	race, err := RequireString(params, "race")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	class, err := RequireString(params, "class")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
 	}
 
-	scores := params["ability_scores"].(map[string]any)
+	level := OptionalInt(params, "level", 1)
+
+	scores, err := RequireMap(params, "ability_scores")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 	abilityScores := engine.AbilityScoresInput{
-		Strength:     int(scores["strength"].(float64)),
-		Dexterity:    int(scores["dexterity"].(float64)),
-		Constitution: int(scores["constitution"].(float64)),
-		Intelligence: int(scores["intelligence"].(float64)),
-		Wisdom:       int(scores["wisdom"].(float64)),
-		Charisma:     int(scores["charisma"].(float64)),
+		Strength:     OptionalInt(scores, "strength", 10),
+		Dexterity:    OptionalInt(scores, "dexterity", 10),
+		Constitution: OptionalInt(scores, "constitution", 10),
+		Intelligence: OptionalInt(scores, "intelligence", 10),
+		Wisdom:       OptionalInt(scores, "wisdom", 10),
+		Charisma:     OptionalInt(scores, "charisma", 10),
 	}
 
-	alignment := "True Neutral"
-	if a, ok := params["alignment"].(string); ok {
-		alignment = a
-	}
+	alignment := OptionalString(params, "alignment", "True Neutral")
+	background := OptionalString(params, "background", "")
+
+	gameID := model.ID(gameIDStr)
 
 	pc := &engine.PlayerCharacterInput{
 		Name:          name,
@@ -107,10 +119,7 @@ func (t *CreatePCTool) Execute(ctx context.Context, params map[string]any) (*Too
 		Level:         level,
 		Alignment:     alignment,
 		AbilityScores: abilityScores,
-	}
-
-	if bg, ok := params["background"].(string); ok {
-		pc.Background = bg
+		Background:    background,
 	}
 
 	req := engine.CreatePCRequest{
@@ -199,33 +208,33 @@ func NewCreateNPCTool(e *engine.Engine) *CreateNPCTool {
 func (t *CreateNPCTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	name := params["name"].(string)
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	name, err := RequireString(params, "name")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
 
 	npc := &engine.NPCInput{
-		Name: name,
+		Name:         name,
+		Description:  OptionalString(params, "description", ""),
+		Occupation:   OptionalString(params, "occupation", ""),
+		Attitude:     OptionalString(params, "attitude", ""),
+		CreatureType: OptionalString(params, "creature_type", ""),
 	}
 
-	if desc, ok := params["description"].(string); ok {
-		npc.Description = desc
-	}
-	if occ, ok := params["occupation"].(string); ok {
-		npc.Occupation = occ
-	}
-	if att, ok := params["attitude"].(string); ok {
-		npc.Attitude = att
-	}
-	if ct, ok := params["creature_type"].(string); ok {
-		npc.CreatureType = ct
-	}
 	if scores, ok := params["ability_scores"].(map[string]any); ok {
 		npc.AbilityScores = engine.AbilityScoresInput{
-			Strength:     int(scores["strength"].(float64)),
-			Dexterity:    int(scores["dexterity"].(float64)),
-			Constitution: int(scores["constitution"].(float64)),
-			Intelligence: int(scores["intelligence"].(float64)),
-			Wisdom:       int(scores["wisdom"].(float64)),
-			Charisma:     int(scores["charisma"].(float64)),
+			Strength:     OptionalInt(scores, "strength", 10),
+			Dexterity:    OptionalInt(scores, "dexterity", 10),
+			Constitution: OptionalInt(scores, "constitution", 10),
+			Intelligence: OptionalInt(scores, "intelligence", 10),
+			Wisdom:       OptionalInt(scores, "wisdom", 10),
+			Charisma:     OptionalInt(scores, "charisma", 10),
 		}
 	}
 
@@ -305,27 +314,24 @@ func NewCreateEnemyTool(e *engine.Engine) *CreateEnemyTool {
 func (t *CreateEnemyTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	name := params["name"].(string)
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	name, err := RequireString(params, "name")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
 
 	enemy := &engine.EnemyInput{
-		Name: name,
-	}
-
-	if hp, ok := params["hit_points"].(float64); ok {
-		enemy.HitPoints = int(hp)
-	}
-	if ac, ok := params["armor_class"].(float64); ok {
-		enemy.ArmorClass = int(ac)
-	}
-	if cr, ok := params["challenge_rating"].(string); ok {
-		enemy.ChallengeRating = cr
-	}
-	if ct, ok := params["creature_type"].(string); ok {
-		enemy.CreatureType = ct
-	}
-	if xp, ok := params["xp_value"].(float64); ok {
-		enemy.XPValue = int(xp)
+		Name:            name,
+		HitPoints:       OptionalInt(params, "hit_points", 0),
+		ArmorClass:      OptionalInt(params, "armor_class", 0),
+		ChallengeRating: OptionalString(params, "challenge_rating", ""),
+		CreatureType:    OptionalString(params, "creature_type", ""),
+		XPValue:         OptionalInt(params, "xp_value", 0),
 	}
 
 	req := engine.CreateEnemyRequest{
@@ -392,18 +398,21 @@ func NewCreateCompanionTool(e *engine.Engine) *CreateCompanionTool {
 func (t *CreateCompanionTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	name := params["name"].(string)
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	name, err := RequireString(params, "name")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
 
 	companion := &engine.CompanionInput{
-		Name: name,
-	}
-
-	if lid, ok := params["leader_id"].(string); ok {
-		companion.LeaderID = lid
-	}
-	if loyalty, ok := params["loyalty"].(float64); ok {
-		companion.Loyalty = int(loyalty)
+		Name:     name,
+		LeaderID: OptionalString(params, "leader_id", ""),
+		Loyalty:  OptionalInt(params, "loyalty", 0),
 	}
 
 	req := engine.CreateCompanionRequest{
@@ -462,8 +471,17 @@ func NewGetActorTool(e *engine.Engine) *GetActorTool {
 func (t *GetActorTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
 
 	req := engine.GetActorRequest{
 		GameID:  gameID,
@@ -518,8 +536,17 @@ func NewGetPCTool(e *engine.Engine) *GetPCTool {
 func (t *GetPCTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	pcID := model.ID(params["pc_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	pcIDStr, err := RequireString(params, "pc_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	pcID := model.ID(pcIDStr)
 
 	req := engine.GetPCRequest{
 		GameID: gameID,
@@ -574,13 +601,18 @@ func NewListActorsTool(e *engine.Engine) *ListActorsTool {
 func (t *ListActorsTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
 
 	req := engine.ListActorsRequest{
 		GameID: gameID,
 	}
 
-	if tf, ok := params["type_filter"].(string); ok && tf != "" {
+	if tf := OptionalString(params, "type_filter", ""); tf != "" {
 		req.Filter = &engine.ActorFilter{
 			Types: []model.ActorType{model.ActorType(tf)},
 		}
@@ -638,9 +670,21 @@ func NewUpdateActorTool(e *engine.Engine) *UpdateActorTool {
 func (t *UpdateActorTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
-	updates := params["updates"].(map[string]any)
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	updates, err := RequireMap(params, "updates")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
 
 	update := engine.ActorUpdate{}
 
@@ -674,7 +718,7 @@ func (t *UpdateActorTool) Execute(ctx context.Context, params map[string]any) (*
 		Update:  update,
 	}
 
-	err := e.UpdateActor(ctx, req)
+	err = e.UpdateActor(ctx, req)
 	if err != nil {
 		return &ToolResult{
 			Success: false,
@@ -721,15 +765,24 @@ func NewRemoveActorTool(e *engine.Engine) *RemoveActorTool {
 func (t *RemoveActorTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
 
 	req := engine.RemoveActorRequest{
 		GameID:  gameID,
 		ActorID: actorID,
 	}
 
-	err := e.RemoveActor(ctx, req)
+	err = e.RemoveActor(ctx, req)
 	if err != nil {
 		return &ToolResult{
 			Success: false,
@@ -780,9 +833,21 @@ func NewAddExperienceTool(e *engine.Engine) *AddExperienceTool {
 func (t *AddExperienceTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	pcID := model.ID(params["pc_id"].(string))
-	xp := int(params["xp"].(float64))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	pcIDStr, err := RequireString(params, "pc_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	xp, err := RequireInt(params, "xp")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	pcID := model.ID(pcIDStr)
 
 	req := engine.AddExperienceRequest{
 		GameID: gameID,

@@ -46,13 +46,24 @@ func NewStartCombatTool(e *engine.Engine) *StartCombatTool {
 func (t *StartCombatTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	sceneID := model.ID(params["scene_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	sceneIDStr, err := RequireString(params, "scene_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	participantStrs, err := RequireStringArray(params, "participant_ids")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 
-	participantIDs := params["participant_ids"].([]any)
-	pids := make([]model.ID, len(participantIDs))
-	for i, pid := range participantIDs {
-		pids[i] = model.ID(pid.(string))
+	gameID := model.ID(gameIDStr)
+	sceneID := model.ID(sceneIDStr)
+	pids := make([]model.ID, len(participantStrs))
+	for i, pid := range participantStrs {
+		pids[i] = model.ID(pid)
 	}
 
 	req := engine.StartCombatRequest{
@@ -119,19 +130,32 @@ func NewStartCombatWithSurpriseTool(e *engine.Engine) *StartCombatWithSurpriseTo
 func (t *StartCombatWithSurpriseTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	sceneID := model.ID(params["scene_id"].(string))
-
-	stealthyIDs := params["stealthy_side"].([]any)
-	stealthy := make([]model.ID, len(stealthyIDs))
-	for i, id := range stealthyIDs {
-		stealthy[i] = model.ID(id.(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	sceneIDStr, err := RequireString(params, "scene_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	stealthyStrs, err := RequireStringArray(params, "stealthy_side")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	observerStrs, err := RequireStringArray(params, "observers")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
 	}
 
-	observerIDs := params["observers"].([]any)
-	observers := make([]model.ID, len(observerIDs))
-	for i, id := range observerIDs {
-		observers[i] = model.ID(id.(string))
+	gameID := model.ID(gameIDStr)
+	sceneID := model.ID(sceneIDStr)
+	stealthy := make([]model.ID, len(stealthyStrs))
+	for i, id := range stealthyStrs {
+		stealthy[i] = model.ID(id)
+	}
+	observers := make([]model.ID, len(observerStrs))
+	for i, id := range observerStrs {
+		observers[i] = model.ID(id)
 	}
 
 	req := engine.StartCombatWithSurpriseRequest{
@@ -185,8 +209,12 @@ func NewGetCurrentCombatTool(e *engine.Engine) *GetCurrentCombatTool {
 func (t *GetCurrentCombatTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 
+	gameID := model.ID(gameIDStr)
 	req := engine.GetCurrentCombatRequest{
 		GameID: gameID,
 	}
@@ -235,8 +263,12 @@ func NewGetCurrentTurnTool(e *engine.Engine) *GetCurrentTurnTool {
 func (t *GetCurrentTurnTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 
+	gameID := model.ID(gameIDStr)
 	req := engine.GetCurrentTurnRequest{
 		GameID: gameID,
 	}
@@ -285,8 +317,12 @@ func NewNextTurnTool(e *engine.Engine) *NextTurnTool {
 func (t *NextTurnTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 
+	gameID := model.ID(gameIDStr)
 	req := engine.NextTurnRequest{
 		GameID: gameID,
 	}
@@ -343,9 +379,22 @@ func NewExecuteActionTool(e *engine.Engine) *ExecuteActionTool {
 func (t *ExecuteActionTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
-	actionType := model.ActionType(params["action_type"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actionTypeStr, err := RequireString(params, "action_type")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
+	actionType := model.ActionType(actionTypeStr)
 
 	req := engine.ExecuteActionRequest{
 		GameID:  gameID,
@@ -424,29 +473,37 @@ func NewExecuteAttackTool(e *engine.Engine) *ExecuteAttackTool {
 func (t *ExecuteAttackTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	attackerID := model.ID(params["attacker_id"].(string))
-	targetID := model.ID(params["target_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	attackerIDStr, err := RequireString(params, "attacker_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	targetIDStr, err := RequireString(params, "target_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	attackerID := model.ID(attackerIDStr)
+	targetID := model.ID(targetIDStr)
 
 	attack := engine.AttackInput{}
 
-	if wid, ok := params["weapon_id"].(string); ok && wid != "" {
+	if wid := OptionalString(params, "weapon_id", ""); wid != "" {
 		id := model.ID(wid)
 		attack.WeaponID = &id
 	}
-	if unarmed, ok := params["is_unarmed"].(bool); ok {
-		attack.IsUnarmed = unarmed
-	}
-	if offHand, ok := params["is_off_hand"].(bool); ok {
-		attack.IsOffHand = offHand
-	}
-	if adv, ok := params["advantage"].(string); ok {
-		switch adv {
-		case "advantage":
-			attack.Advantage = model.RollModifier{Advantage: true}
-		case "disadvantage":
-			attack.Advantage = model.RollModifier{Disadvantage: true}
-		}
+	attack.IsUnarmed = OptionalBool(params, "is_unarmed", false)
+	attack.IsOffHand = OptionalBool(params, "is_off_hand", false)
+	adv := OptionalString(params, "advantage", "none")
+	switch adv {
+	case "advantage":
+		attack.Advantage = model.RollModifier{Advantage: true}
+	case "disadvantage":
+		attack.Advantage = model.RollModifier{Disadvantage: true}
 	}
 
 	req := engine.ExecuteAttackRequest{
@@ -512,10 +569,25 @@ func NewMoveActorTool(e *engine.Engine) *MoveActorTool {
 func (t *MoveActorTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
-	x := int(params["x"].(float64))
-	y := int(params["y"].(float64))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	x, err := RequireInt(params, "x")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	y, err := RequireInt(params, "y")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
 
 	req := engine.MoveActorRequest{
 		GameID:  gameID,
@@ -582,15 +654,28 @@ func NewExecuteDamageTool(e *engine.Engine) *ExecuteDamageTool {
 func (t *ExecuteDamageTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	targetID := model.ID(params["target_id"].(string))
-	amount := int(params["amount"].(float64))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	targetIDStr, err := RequireString(params, "target_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	amount, err := RequireInt(params, "amount")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	targetID := model.ID(targetIDStr)
 
 	damage := engine.DamageInput{
 		Amount: amount,
 	}
 
-	if dt, ok := params["damage_type"].(string); ok {
+	dt := OptionalString(params, "damage_type", "")
+	if dt != "" {
 		damage.Type = model.DamageType(dt)
 	}
 
@@ -652,9 +737,21 @@ func NewExecuteHealingTool(e *engine.Engine) *ExecuteHealingTool {
 func (t *ExecuteHealingTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	targetID := model.ID(params["target_id"].(string))
-	amount := int(params["amount"].(float64))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	targetIDStr, err := RequireString(params, "target_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	amount, err := RequireInt(params, "amount")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	targetID := model.ID(targetIDStr)
 
 	req := engine.ExecuteHealingRequest{
 		GameID:   gameID,
@@ -710,8 +807,17 @@ func NewPerformDeathSaveTool(e *engine.Engine) *PerformDeathSaveTool {
 func (t *PerformDeathSaveTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
-	actorID := model.ID(params["actor_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+	actorIDStr, err := RequireString(params, "actor_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
+
+	gameID := model.ID(gameIDStr)
+	actorID := model.ID(actorIDStr)
 
 	req := engine.SavingThrowRequest{
 		GameID:  gameID,
@@ -771,13 +877,17 @@ func NewEndCombatTool(e *engine.Engine) *EndCombatTool {
 func (t *EndCombatTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
 	e := t.Engine().(*engine.Engine)
 
-	gameID := model.ID(params["game_id"].(string))
+	gameIDStr, err := RequireString(params, "game_id")
+	if err != nil {
+		return &ToolResult{Success: false, Error: err.Error()}, nil
+	}
 
+	gameID := model.ID(gameIDStr)
 	req := engine.EndCombatRequest{
 		GameID: gameID,
 	}
 
-	err := e.EndCombat(ctx, req)
+	err = e.EndCombat(ctx, req)
 	if err != nil {
 		return &ToolResult{
 			Success: false,

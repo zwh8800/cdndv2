@@ -281,6 +281,7 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 			log.Debug("[MainAgent] Delegate task calls detected",
 				zap.Int("count", len(delegateCalls)),
 			)
+			agentResp.DelegateToolCalls = delegateCalls
 			agentResp.SubAgentCalls = m.convertToSubAgentCalls(delegateCalls)
 			// 只读工具调用也保留，和委托并行执行
 			agentResp.ToolCalls = readOnlyCalls

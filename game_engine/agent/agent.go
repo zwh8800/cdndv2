@@ -106,12 +106,13 @@ type SubAgentCall struct {
 
 // AgentResponse Agent响应
 type AgentResponse struct {
-	Content       string         `json:"content"`         // 生成的文本内容
-	ToolCalls     []llm.ToolCall `json:"tool_calls"`      // 需要执行的Tool调用
-	SubAgentCalls []SubAgentCall `json:"sub_agent_calls"` // 需要调用的子Agent
-	NextAction    NextAction     `json:"next_action"`     // 下一步动作
-	StateChange   *StateChange   `json:"state_change"`    // 状态变更
-	Errors        []AgentError   `json:"errors"`          // 错误信息
+	Content           string         `json:"content"`             // 生成的文本内容
+	ToolCalls         []llm.ToolCall `json:"tool_calls"`          // 需要执行的Tool调用
+	DelegateToolCalls []llm.ToolCall `json:"delegate_tool_calls"` // 原始 delegate_task 工具调用（用于维护 OpenAI 对话格式）
+	SubAgentCalls     []SubAgentCall `json:"sub_agent_calls"`     // 需要调用的子Agent
+	NextAction        NextAction     `json:"next_action"`         // 下一步动作
+	StateChange       *StateChange   `json:"state_change"`        // 状态变更
+	Errors            []AgentError   `json:"errors"`              // 错误信息
 }
 
 // NextAction 下一步动作类型

@@ -305,6 +305,11 @@ func (l *ReActLoop) route(ctx context.Context) {
 				nil,
 			))
 		}
+
+		// 同步 agentContext.History，确保 Think 阶段能看到完整历史
+		if l.state.agentContext != nil {
+			l.state.agentContext.History = l.state.History
+		}
 	}
 
 	// 转入Think阶段，让MainAgent处理结果或生成叙事
@@ -417,8 +422,8 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 		return PhaseThink // 继续思考
 	}
 
-	// 处理内容输出
-	if result.Content != "" {
+	// 处理内容输出（ActionDelegate 由其分支内以 tool_call 格式添加，避免重复）
+	if result.Content != "" && result.NextAction != agent.ActionDelegate {
 		l.state.History = append(l.state.History, llm.NewAssistantMessage(result.Content, nil))
 		log.Debug("Assistant message added to history",
 			zap.String("content", truncateString(result.Content, 200)),
@@ -430,31 +435,57 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 	case agent.ActionDelegate:
 		log.Debug("Action: Delegate",
 			zap.Int("delegationCount", len(result.SubAgentCalls)),
+			zap.Int("delegateToolCalls", len(result.DelegateToolCalls)),
 			zap.Int("regularToolCount", len(result.ToolCalls)),
 		)
+
+		// 构建完整的 tool_calls 列表（delegate + read-only），符合 OpenAI 对话格式
+		allToolCalls := make([]llm.ToolCall, 0, len(result.DelegateToolCalls)+len(result.ToolCalls))
+		allToolCalls = append(allToolCalls, result.DelegateToolCalls...)
+		allToolCalls = append(allToolCalls, result.ToolCalls...)
+
+		// 添加 assistant 消息（包含 tool_calls），这是 OpenAI function calling 必需的格式
+		l.state.History = append(l.state.History, llm.NewAssistantMessage(result.Content, allToolCalls))
+
 		// 执行委托任务
 		delegationResults := l.executeDelegations(ctx, result.SubAgentCalls)
-		if len(delegationResults) > 0 {
-			// 将委托结果存入上下文，供主Agent下一轮使用
-			if l.state.agentContext != nil {
-				for _, res := range delegationResults {
-					l.state.agentContext.AddAgentResult(res)
-				}
-			}
-			// 生成结果摘要添加到历史
-			var resultSummaries []string
-			for agentName, res := range delegationResults {
+
+		// 为每个 delegate_task 调用添加对应的 tool result 消息
+		for _, dtc := range result.DelegateToolCalls {
+			agentName, _, _ := tool.ExtractDelegation(dtc.Arguments)
+			var content string
+			if res, ok := delegationResults[agentName]; ok {
 				if res.Success {
-					resultSummaries = append(resultSummaries, fmt.Sprintf("[%s] %s", agentName, res.Content))
+					content = res.Content
 				} else {
-					resultSummaries = append(resultSummaries, fmt.Sprintf("[%s] 错误: %s", agentName, res.Error))
+					content = "错误: " + res.Error
 				}
+			} else {
+				content = "错误: 未找到Agent执行结果"
 			}
-			l.state.History = append(l.state.History, llm.NewAssistantMessage(
-				fmt.Sprintf("委托任务执行完成:\n%s", joinStrings(resultSummaries, "\n")),
-				nil,
-			))
+			l.state.History = append(l.state.History, llm.NewToolMessage(content, dtc.ID))
 		}
+
+		// 执行只读工具调用（如果有）
+		if len(result.ToolCalls) > 0 {
+			toolResults := l.executeTools(ctx, result.ToolCalls)
+			for _, tr := range toolResults {
+				l.state.History = append(l.state.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
+			}
+		}
+
+		// 将委托结果存入上下文（供 Synthesize 阶段使用）
+		if l.state.agentContext != nil {
+			for _, res := range delegationResults {
+				l.state.agentContext.AddAgentResult(res)
+			}
+		}
+
+		// 同步 agentContext.History，确保下一轮 LLM 能看到完整历史
+		if l.state.agentContext != nil {
+			l.state.agentContext.History = l.state.History
+		}
+
 		return PhaseThink // 主Agent继续思考
 
 	case agent.ActionSynthesize:
@@ -579,8 +610,14 @@ func (l *ReActLoop) executeDelegationsParallel(ctx context.Context, calls []agen
 	return results
 }
 
+// subAgentMaxIterations 子Agent内部循环最大迭代次数
+const subAgentMaxIterations = 10
+
 // executeSingleDelegation 执行单个委托任务
+// 内部实现迷你ReAct循环：子Agent可能多次调用工具，直到生成最终文本响应
 func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubAgentCall) *agent.AgentCallResult {
+	log := l.getLogger()
+
 	subAgent, ok := l.agents[call.AgentName]
 	if !ok {
 		return &agent.AgentCallResult{
@@ -599,26 +636,80 @@ func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubA
 		Context:   subCtx,
 	}
 
-	// 执行子Agent
-	resp, err := subAgent.Execute(ctx, req)
-	if err != nil {
-		return &agent.AgentCallResult{
-			AgentName: call.AgentName,
-			Success:   false,
-			Error:     "子Agent执行失败: " + err.Error(),
+	// 迷你ReAct循环：反复调用子Agent直到它生成最终文本响应
+	for iteration := 0; iteration < subAgentMaxIterations; iteration++ {
+		log.Debug("SubAgent iteration",
+			zap.String("agentName", call.AgentName),
+			zap.Int("iteration", iteration),
+			zap.Int("subHistoryLength", len(subCtx.History)),
+		)
+
+		// 执行子Agent
+		resp, err := subAgent.Execute(ctx, req)
+		if err != nil {
+			return &agent.AgentCallResult{
+				AgentName: call.AgentName,
+				Success:   false,
+				Error:     "子Agent执行失败: " + err.Error(),
+			}
+		}
+
+		// 如果没有Tool调用，说明子Agent已生成最终响应
+		if len(resp.ToolCalls) == 0 {
+			log.Debug("SubAgent completed with final response",
+				zap.String("agentName", call.AgentName),
+				zap.Int("iterations", iteration+1),
+				zap.String("content", truncateString(resp.Content, 200)),
+			)
+			return &agent.AgentCallResult{
+				AgentName: call.AgentName,
+				Success:   true,
+				Content:   resp.Content,
+			}
+		}
+
+		// 有Tool调用：先将assistant消息（含tool_calls）加入子会话历史
+		subCtx.History = append(subCtx.History, llm.NewAssistantMessage(resp.Content, resp.ToolCalls))
+
+		// 执行工具并将结果加入子会话历史
+		toolResults := l.tools.ExecuteTools(ctx, resp.ToolCalls)
+		for _, tr := range toolResults {
+			subCtx.History = append(subCtx.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
+			log.Debug("SubAgent tool result",
+				zap.String("agentName", call.AgentName),
+				zap.String("toolCallID", tr.ToolCallID),
+				zap.Bool("isError", tr.IsError),
+				zap.String("content", truncateString(tr.Content, 100)),
+			)
+		}
+
+		// 更新请求上下文，下一轮循环子Agent将看到工具结果
+		// UserInput 只在第一轮传入，后续轮次清空避免重复
+		req = &agent.AgentRequest{
+			UserInput: "",
+			Context:   subCtx,
 		}
 	}
 
-	// 如果子Agent有Tool调用，在子会话中执行它们
-	if len(resp.ToolCalls) > 0 {
-		l.executeSubAgentTools(ctx, subCtx, resp.ToolCalls)
+	// 达到最大迭代次数，返回当前已有的内容
+	log.Warn("SubAgent reached max iterations",
+		zap.String("agentName", call.AgentName),
+		zap.Int("maxIterations", subAgentMaxIterations),
+	)
+
+	// 从子会话历史中提取最后一次的内容作为结果
+	var lastContent string
+	for i := len(subCtx.History) - 1; i >= 0; i-- {
+		if subCtx.History[i].Role == llm.RoleAssistant && subCtx.History[i].Content != "" {
+			lastContent = subCtx.History[i].Content
+			break
+		}
 	}
 
 	return &agent.AgentCallResult{
 		AgentName: call.AgentName,
 		Success:   true,
-		Content:   resp.Content,
-		ToolCalls: resp.ToolCalls,
+		Content:   lastContent,
 	}
 }
 
@@ -636,15 +727,6 @@ func (l *ReActLoop) createSubSession(parentCtx *agent.AgentContext) *agent.Agent
 		Metadata:     make(map[string]any),
 		Parent:       parentCtx, // 链接父会话
 		IsSubSession: true,
-	}
-}
-
-// executeSubAgentTools 在子会话中执行SubAgent的工具调用
-func (l *ReActLoop) executeSubAgentTools(ctx context.Context, subCtx *agent.AgentContext, toolCalls []llm.ToolCall) {
-	toolResults := l.tools.ExecuteTools(ctx, toolCalls)
-	// 将工具结果追加到子会话历史，不污染父会话
-	for _, tr := range toolResults {
-		subCtx.History = append(subCtx.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
 	}
 }
 

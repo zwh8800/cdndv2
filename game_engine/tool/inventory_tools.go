@@ -209,7 +209,7 @@ func NewGetInventoryTool(e *engine.Engine) *GetInventoryTool {
 	return &GetInventoryTool{
 		EngineTool: *NewEngineTool(
 			"get_inventory",
-			"获取角色库存信息",
+			"获取角色背包中的所有物品列表，包括物品名称、数量、重量、类型等，以及总重量。Use when: 玩家询问'我包里有什么'；需要确认角色是否拥有某件物品；检查负重情况。Do NOT use when: 只需要查看当前装备的物品（用 get_equipment）；需要添加/移除物品（用 add_item/remove_item，这是 write 操作）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{

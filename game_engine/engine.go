@@ -106,9 +106,14 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 		}
 	}
 
-	// 创建路由Agent
-	router := createRouter(llmClient, subAgents)
-	router.SetLogger(logger)
+	// 创建路由Agent（默认禁用，由 MainAgent 通过 delegate_task 直接委派）
+	// delegate_task 已覆盖全部 11 个 SubAgent，RouterAgent 作为额外 LLM 调用已不再必要
+	// 如需启用，可传入 router 实例
+	var router *agent.RouterAgent
+	// router = createRouter(llmClient, subAgents)
+	// if router != nil {
+	// 	router.SetLogger(logger)
+	// }
 
 	// 创建主Agent
 	mainAgent := agent.NewMainAgent(registry, llmClient)
@@ -129,7 +134,7 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	reactLoop := NewReActLoop(
 		dndEngine,
 		mainAgent,
-		router,
+		router, // nil = 跳过 Route 阶段，直接进入 Think
 		subAgents,
 		registry,
 		llmClient,

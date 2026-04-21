@@ -41,12 +41,40 @@ type SceneSummary struct {
 
 // ActorSummary 角色摘要
 type ActorSummary struct {
-	ID         model.ID `json:"id"`
-	Name       string   `json:"name"`
-	Type       string   `json:"type"`
-	HitPoints  int      `json:"hit_points"`
-	MaxHP      int      `json:"max_hp"`
-	ArmorClass int      `json:"armor_class"`
+	ID               model.ID            `json:"id"`
+	Name             string              `json:"name"`
+	Type             string              `json:"type"`
+	HitPoints        int                 `json:"hit_points"`
+	MaxHP            int                 `json:"max_hp"`
+	TempHitPoints    int                 `json:"temp_hit_points"`
+	ArmorClass       int                 `json:"armor_class"`
+	Speed            int                 `json:"speed"`
+	ProficiencyBonus int                 `json:"proficiency_bonus"`
+	// 扩展字段
+	Race             string              `json:"race,omitempty"`
+	Background       string              `json:"background,omitempty"`
+	TotalLevel       int                 `json:"total_level,omitempty"`
+	Experience       int                 `json:"experience,omitempty"`
+	Features         []string            `json:"features,omitempty"`
+	RacialTraits     []string            `json:"racial_traits,omitempty"`
+	// 属性值
+	AbilityScores    *AbilityScoreValues `json:"ability_scores,omitempty"`
+	// 状态效果
+	Conditions       []string            `json:"conditions,omitempty"`
+	Exhaustion       int                 `json:"exhaustion,omitempty"`
+	// 战斗相关
+	InitiativeBonus  int                 `json:"initiative_bonus,omitempty"`
+	Inspiration      bool                `json:"inspiration,omitempty"`
+}
+
+// AbilityScoreValues 简化版属性值（用于摘要）
+type AbilityScoreValues struct {
+	STR int `json:"str"`
+	DEX int `json:"dex"`
+	CON int `json:"con"`
+	INT int `json:"int"`
+	WIS int `json:"wis"`
+	CHA int `json:"cha"`
 }
 
 // CombatSummary 战斗摘要
@@ -90,14 +118,32 @@ func CollectSummary(ctx context.Context, e *engine.Engine, gameID model.ID, play
 			PCID:   playerID,
 		})
 		if err == nil && pcResult.PC != nil {
-			summary.Player = &ActorSummary{
-				ID:         pcResult.PC.ID,
-				Name:       pcResult.PC.Name,
-				Type:       "PC",
-				HitPoints:  pcResult.PC.HitPoints.Current,
-				MaxHP:      pcResult.PC.HitPoints.Maximum,
-				ArmorClass: pcResult.PC.ArmorClass,
+			pc := pcResult.PC
+			actorSummary := &ActorSummary{
+				ID:               pc.ID,
+				Name:             pc.Name,
+				Type:             "PC",
+				HitPoints:        pc.HitPoints.Current,
+				MaxHP:            pc.HitPoints.Maximum,
+				ArmorClass:       pc.ArmorClass,
+				Speed:            pc.Speed,
+				ProficiencyBonus: pc.ProficiencyBonus,
+				Race:             pc.Race,
+				Background:       pc.Background,
+				TotalLevel:       pc.TotalLevel,
+				Experience:       pc.Experience,
+				Features:         pc.Features,
+				RacialTraits:     pc.RacialTraits,
+				AbilityScores: &AbilityScoreValues{
+					STR: pc.AbilityScores.Strength,
+					DEX: pc.AbilityScores.Dexterity,
+					CON: pc.AbilityScores.Constitution,
+					INT: pc.AbilityScores.Intelligence,
+					WIS: pc.AbilityScores.Wisdom,
+					CHA: pc.AbilityScores.Charisma,
+				},
 			}
+			summary.Player = actorSummary
 		}
 	}
 

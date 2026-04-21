@@ -180,6 +180,96 @@ func (r *ToolRegistry) IsToolReadOnly(toolName string) (bool, bool) {
 	return t.ReadOnly(), true
 }
 
+// GetReadOnlySchemasByPhase 根据游戏阶段返回只读工具的 LLM 函数调用格式 Schema
+// 按阶段裁剪工具集，减少 LLM 每次调用时的工具数量，提高选择准确率
+// phase 可选值: character_creation, exploration, combat, rest
+func (r *ToolRegistry) GetReadOnlySchemasByPhase(phase string) []map[string]any {
+	baseTools := r.getPhaseBaseTools()
+	phaseTools := r.getPhaseSpecificTools(phase)
+
+	toolSet := make(map[string]bool)
+	for _, t := range baseTools {
+		toolSet[t] = true
+	}
+	for _, t := range phaseTools {
+		toolSet[t] = true
+	}
+
+	schemas := make([]map[string]any, 0, len(toolSet))
+	for name := range toolSet {
+		t, ok := r.tools[name]
+		if !ok || !t.ReadOnly() {
+			continue
+		}
+		schemas = append(schemas, map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        t.Name(),
+				"description": t.Description(),
+				"parameters":  t.ParametersSchema(),
+			},
+		})
+	}
+	return schemas
+}
+
+// getPhaseBaseTools 返回所有阶段都需要的核心只读工具
+func (r *ToolRegistry) getPhaseBaseTools() []string {
+	return []string{
+		"get_actor",
+		"get_pc",
+		"list_actors",
+		"get_phase",
+	}
+}
+
+// getPhaseSpecificTools 返回特定阶段额外需要的只读工具
+func (r *ToolRegistry) getPhaseSpecificTools(phase string) []string {
+	switch phase {
+	case "character_creation":
+		return []string{
+			"list_races", "get_race",
+			"list_classes", "get_class",
+			"list_backgrounds", "get_background",
+			"list_feats_data", "get_feat_data",
+		}
+	case "exploration":
+		return []string{
+			"get_current_scene", "get_scene", "list_scenes",
+			"get_scene_actors", "get_scene_items",
+			"get_inventory", "get_equipment",
+			"get_passive_perception",
+			"get_npc_attitude",
+			"get_quest", "list_quests", "get_actor_quests",
+			"get_magic_item_bonus",
+			"calculate_breath_holding", "calculate_mount_speed",
+			"get_crafting_recipes",
+			"list_spells", "get_spell",
+			"list_weapons", "list_armors", "list_magic_items",
+			"list_monsters", "get_monster",
+		}
+	case "combat":
+		return []string{
+			"get_current_combat", "get_current_turn",
+			"get_actor", "get_pc", "list_actors",
+			"get_inventory", "get_equipment",
+			"get_spell_slots",
+			"get_passive_perception",
+			"list_spells", "get_spell",
+		}
+	case "rest":
+		return []string{
+			"get_actor", "get_pc",
+			"get_inventory", "get_equipment",
+			"get_spell_slots",
+			"get_quest", "list_quests", "get_actor_quests",
+		}
+	default:
+		// 未知阶段，返回 exploration 作为默认
+		return r.getPhaseSpecificTools("exploration")
+	}
+}
+
 // ExecuteTools 执行多个Tool调用
 func (r *ToolRegistry) ExecuteTools(ctx context.Context, calls []llm.ToolCall) []llm.ToolResult {
 	log := r.getLogger()

@@ -1093,7 +1093,7 @@ func NewReActLoop(...) *ReActLoop {
 |------|--------|------|------|
 | 补全 `delegate_task` 枚举（暴露全部 11 个代理） | 小 | 解锁 8 个不可达代理 | ✅ 已完成 |
 | 删除系统提示中的内联工具列表 | 小 | 消除 token 冗余 | ✅ 已完成 |
-| 增强工具描述（5-10 个最常用工具） | 小 | 提升工具选择准确率 | ❌ 待做 |
+| 增强工具描述（15 个最常用工具） | 小 | 提升工具选择准确率 | ✅ 已完成 |
 | 幻觉循环检测（3次重复检测） | 小 | 减少无限循环 | ✅ 已完成 |
 | SubAgent 最大迭代降至 5 | 极小 | 减少 LLM 调用 | ✅ 已完成 |
 | 最大委托次数提升至 15 | 极小 | 适配 11 代理架构 | ✅ 已完成 |
@@ -1105,11 +1105,10 @@ func NewReActLoop(...) *ReActLoop {
 
 | 改进 | 工作量 | 影响 | 状态 |
 |------|--------|------|------|
-| 基于 Phase 的动态工具过滤 | 中 | MainAgent 工具数降至 ≤15 | 🔧 Phase 基础设施已就位 |
-| 游戏状态摘要增强（RichGameSummary） | 中 | 减少冗余工具调用 | ❌ 待做 |
-| 自动上下文注入（game_id, pc_id 等） | 中 | 减少参数错误 | ❌ 待做 |
-| 名称解析机制 | 中 | 消除 name-vs-ID 错误 | ❌ 待做 |
-| 删除 RouterAgent，保留 delegate_task | 小 | 减少 1 次 LLM 调用 | ❌ 待做 |
+| 基于 Phase 的动态工具过滤 | 中 | MainAgent 工具数降至 8-25 | ✅ 已完成 |
+| 游戏状态摘要增强（RichGameSummary） | 中 | 减少冗余工具调用 | ✅ 已完成 |
+| 自动上下文注入 + 名称解析机制 | 中 | 消除 name-vs-ID 错误 | ✅ 已完成 |
+| 删除 RouterAgent，保留 delegate_task | 小 | 减少 1 次 LLM 调用 | ✅ 已完成 |
 
 ### Phase 2.3 (4-8 周)
 
@@ -1148,6 +1147,11 @@ func NewReActLoop(...) *ReActLoop {
 | `ToolRegistry.IsToolReadOnly()` 实现 `ToolReadOnlyChecker` 接口 | `tool/registry.go` |
 | `set_phase` 注册注释标注 write_flow 分类 | `agents.go` |
 | MainAgent 删除 `ReadOnlyTools` 模板变量构建 | `agent/main_agent.go` |
+| 15 个常用工具描述增强（Use when / Do NOT use when） | `tool/*.go` |
+| 基于 Phase 的动态工具过滤（4 阶段裁剪） | `tool/registry.go`, `agent/main_agent.go` |
+| 游戏状态摘要增强（属性值/种族/背景/等级/熟练加值/灵感/状态效果） | `game_summary/summary.go`, `formatter.go` |
+| 名称解析机制（actor_id/scene_id 名称→ID 自动转换） | `react_loop.go` |
+| RouterAgent 默认禁用（节省 1 次 LLM 调用） | `engine.go` |
 
 ---
 

@@ -189,7 +189,7 @@ func NewGetCurrentCombatTool(e *engine.Engine) *GetCurrentCombatTool {
 	return &GetCurrentCombatTool{
 		EngineTool: *NewEngineTool(
 			"get_current_combat",
-			"获取当前战斗状态",
+			"获取当前进行中的战斗完整状态，包括所有参战者、先攻顺序、回合信息等。Use when: 需要了解战斗全局态势（还有谁活着、先攻顺序如何）；玩家询问当前战斗情况。Do NOT use when: 只需要知道当前轮到谁（用 get_current_turn）；战斗尚未开始（应先调用 start_combat）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -243,7 +243,7 @@ func NewGetCurrentTurnTool(e *engine.Engine) *GetCurrentTurnTool {
 	return &GetCurrentTurnTool{
 		EngineTool: *NewEngineTool(
 			"get_current_turn",
-			"获取当前回合信息",
+			"获取当前轮到哪个角色的回合信息，包括角色ID、角色名称、回合状态等。Use when: 需要确认当前谁该行动；玩家询问'现在轮到谁了'。Do NOT use when: 需要完整战斗状态（用 get_current_combat）；需要推进到下一回合（用 next_turn，这是 write 操作）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{

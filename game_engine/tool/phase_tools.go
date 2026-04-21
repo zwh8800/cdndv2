@@ -103,7 +103,7 @@ func NewGetPhaseTool(e *engine.Engine) *GetPhaseTool {
 	return &GetPhaseTool{
 		EngineTool: *NewEngineTool(
 			"get_phase",
-			"获取当前游戏阶段",
+			"获取当前游戏阶段（character_creation/exploration/combat/rest）。Use when: 需要确认当前处于哪个阶段以决定下一步可以执行哪些操作；玩家询问当前状态时。Do NOT use when: 你刚刚自己调用了 set_phase（你已知结果）；只需要推进游戏流程而不关心阶段值。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{

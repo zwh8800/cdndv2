@@ -450,7 +450,7 @@ func NewGetActorTool(e *engine.Engine) *GetActorTool {
 	return &GetActorTool{
 		EngineTool: *NewEngineTool(
 			"get_actor",
-			"获取角色的基本信息",
+			"获取任意角色（PC/NPC/Enemy/Companion）的基本信息，包括名称、类型、HP、AC、速度、属性值等。Use when: 需要查看某个角色的当前状态（生命值、护甲等级等）；需要确认角色是否存在或获取其 actor_id。Do NOT use when: 需要 PC 的详细信息如法术列表、装备等（用 get_pc）；需要列出所有角色（用 list_actors）；需要获取 NPC 的态度（用 get_npc_attitude）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -515,7 +515,7 @@ func NewGetPCTool(e *engine.Engine) *GetPCTool {
 	return &GetPCTool{
 		EngineTool: *NewEngineTool(
 			"get_pc",
-			"获取玩家角色(PC)的详细信息",
+			"获取玩家角色(PC)的完整详细信息，包括种族、职业、等级、属性值、技能、法术位、特性等。Use when: 需要 PC 的完整角色卡信息；需要确认 PC 的法术列表、技能修正等详细数据。Do NOT use when: 只需要角色基本信息如 HP/AC（用 get_actor）；需要列出所有角色（用 list_actors）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -580,7 +580,7 @@ func NewListActorsTool(e *engine.Engine) *ListActorsTool {
 	return &ListActorsTool{
 		EngineTool: *NewEngineTool(
 			"list_actors",
-			"列出游戏中的所有角色",
+			"列出游戏中的所有角色（PC/NPC/Enemy/Companion），可通过 type_filter 按类型筛选。Use when: 需要查看场景中有哪些角色；需要获取角色ID列表以进行后续操作（如攻击目标选择）。Do NOT use when: 只需要某个特定角色的信息（用 get_actor）；需要 PC 的详细信息（用 get_pc）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{

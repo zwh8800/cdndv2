@@ -104,7 +104,7 @@ func NewGetSceneTool(e *engine.Engine) *GetSceneTool {
 	return &GetSceneTool{
 		EngineTool: *NewEngineTool(
 			"get_scene",
-			"获取指定场景的详细信息",
+			"获取指定场景的详细信息，包括名称、描述、连接关系等。Use when: 需要了解某个场景的具体描述和配置；玩家询问特定地点的信息。Do NOT use when: 需要获取当前所在场景（用 get_current_scene）；需要列出所有场景（用 list_scenes）；需要查看场景中的角色或物品（用 get_scene_actors/get_scene_items）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -469,7 +469,7 @@ func NewGetCurrentSceneTool(e *engine.Engine) *GetCurrentSceneTool {
 	return &GetCurrentSceneTool{
 		EngineTool: *NewEngineTool(
 			"get_current_scene",
-			"获取当前活跃场景的详细信息",
+			"获取当前角色所在场景的详细信息，包括场景名称、描述、连接关系等。Use when: 需要描述玩家当前所在位置；需要确认当前场景的配置。Do NOT use when: 需要获取指定场景（用 get_scene）；需要查看场景中的角色或物品（用 get_scene_actors/get_scene_items）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{

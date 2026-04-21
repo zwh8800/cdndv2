@@ -30,11 +30,45 @@ func FormatForLLM(summary *GameSummary) string {
 
 	// 玩家角色
 	if summary.Player != nil {
+		p := summary.Player
 		parts = append(parts, "")
 		parts = append(parts, fmt.Sprintf("### 玩家角色"))
-		parts = append(parts, fmt.Sprintf("- 名称: %s", summary.Player.Name))
-		parts = append(parts, fmt.Sprintf("- 生命值: %d/%d", summary.Player.HitPoints, summary.Player.MaxHP))
-		parts = append(parts, fmt.Sprintf("- 护甲等级: %d", summary.Player.ArmorClass))
+		parts = append(parts, fmt.Sprintf("- 名称: %s", p.Name))
+		if p.Race != "" || p.Background != "" {
+			raceBg := p.Race
+			if p.Background != "" {
+				raceBg += " " + p.Background
+			}
+			parts = append(parts, fmt.Sprintf("- 种族/背景: %s", raceBg))
+		}
+		if p.TotalLevel > 0 {
+			parts = append(parts, fmt.Sprintf("- 等级: %d (经验: %d)", p.TotalLevel, p.Experience))
+		}
+		parts = append(parts, fmt.Sprintf("- 生命值: %d/%d", p.HitPoints, p.MaxHP))
+		if p.TempHitPoints > 0 {
+			parts = append(parts, fmt.Sprintf("- 临时HP: %d", p.TempHitPoints))
+		}
+		parts = append(parts, fmt.Sprintf("- 护甲等级: %d", p.ArmorClass))
+		if p.Speed > 0 {
+			parts = append(parts, fmt.Sprintf("- 速度: %d尺", p.Speed))
+		}
+		if p.ProficiencyBonus > 0 {
+			parts = append(parts, fmt.Sprintf("- 熟练加值: +%d", p.ProficiencyBonus))
+		}
+		if p.AbilityScores != nil {
+			a := p.AbilityScores
+			parts = append(parts, fmt.Sprintf("- 属性: 力量%d 敏捷%d 体质%d 智力%d 感知%d 魅力%d",
+				a.STR, a.DEX, a.CON, a.INT, a.WIS, a.CHA))
+		}
+		if p.Inspiration {
+			parts = append(parts, "- 灵感: 有")
+		}
+		if len(p.Conditions) > 0 {
+			parts = append(parts, fmt.Sprintf("- 状态效果: %s", strings.Join(p.Conditions, ", ")))
+		}
+		if p.Exhaustion > 0 {
+			parts = append(parts, fmt.Sprintf("- 力竭等级: %d", p.Exhaustion))
+		}
 	}
 
 	// 战斗状态

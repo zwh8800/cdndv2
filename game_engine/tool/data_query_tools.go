@@ -22,7 +22,7 @@ func NewListRacesTool(e *engine.Engine) *ListRacesTool {
 	return &ListRacesTool{
 		EngineTool: *NewEngineTool(
 			"list_races",
-			"列出所有可用的D&D种族",
+			"列出所有可用的 D&D 5e 种族及其特性（属性加成、种族能力等）。Use when: 玩家询问有哪些种族可选；创建角色时需要参考种族列表。Do NOT use when: 需要某个种族的详细信息（用 get_race）；需要查询职业、背景等其他静态数据（用 list_classes/list_backgrounds 等对应工具）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -66,7 +66,7 @@ func NewGetRaceTool(e *engine.Engine) *GetRaceTool {
 	return &GetRaceTool{
 		EngineTool: *NewEngineTool(
 			"get_race",
-			"获取指定种族的详细信息",
+			"获取指定种族的完整信息，包括属性加成、种族特性、速度等。Use when: 玩家询问某个种族的具体能力；创建角色时需要确认种族的属性加成。参数 name 必须使用中文标准名（人类、精灵、矮人、半身人、龙裔、侏儒、半精灵、半兽人、提夫林）。Do NOT use when: 只需要种族列表（用 list_races）；需要查询的是职业或背景数据。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -366,7 +366,7 @@ func NewListSpellsTool(e *engine.Engine) *ListSpellsTool {
 	return &ListSpellsTool{
 		EngineTool: *NewEngineTool(
 			"list_spells",
-			"列出所有法术数据",
+			"列出所有可用的 D&D 5e 法术及其基本信息（环级、学派、施法时间等）。Use when: 玩家询问有哪些法术可选；施法者需要浏览可用法术列表。Do NOT use when: 需要某个法术的详细信息（用 get_spell）；需要施放法术（用 cast_spell，这是 write 操作）；需要查看施法者的法术位状态（用 get_spell_slots）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -410,7 +410,7 @@ func NewGetSpellTool(e *engine.Engine) *GetSpellTool {
 	return &GetSpellTool{
 		EngineTool: *NewEngineTool(
 			"get_spell",
-			"获取指定法术的详细信息",
+			"获取指定法术的完整信息，包括环级、学派、施法时间、射程、成分、持续时间、效果描述等。Use when: 玩家询问某个法术的具体效果；需要确认法术的伤害类型、豁免属性或作用范围。Do NOT use when: 需要施放该法术（用 cast_spell）；只需要法术列表概览（用 list_spells）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{

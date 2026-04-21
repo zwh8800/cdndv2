@@ -106,8 +106,17 @@ func (m *MainAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentRespo
 		zap.Int("messageCount", len(messages)),
 	)
 
-	// 获取Tools定义 - 只暴露只读工具和 delegate_task
-	tools := m.registry.GetReadOnlySchemas()
+	// 获取Tools定义 - 根据游戏阶段动态裁剪只读工具集 + delegate_task
+	phase := ""
+	if req.Context != nil && req.Context.CurrentState != nil {
+		phase = req.Context.CurrentState.Phase
+	}
+	var tools []map[string]any
+	if phase != "" {
+		tools = m.registry.GetReadOnlySchemasByPhase(phase)
+	} else {
+		tools = m.registry.GetReadOnlySchemas()
+	}
 	if dt, ok := m.registry.Get(tool.DelegateTaskToolName); ok {
 		tools = append(tools, map[string]any{
 			"type": "function",

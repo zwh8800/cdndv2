@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/zwh8800/dnd-core/pkg/engine"
@@ -834,7 +835,8 @@ func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubA
 		// 有Tool调用：先将assistant消息（含tool_calls）加入子会话历史
 		subCtx.History = append(subCtx.History, llm.NewAssistantMessage(resp.Content, resp.ToolCalls))
 
-		// 执行工具并将结果加入子会话历史
+		// 解析名称为ID并执行工具
+		l.resolveToolNames(ctx, resp.ToolCalls)
 		toolResults := l.tools.ExecuteTools(ctx, resp.ToolCalls)
 		for _, tr := range toolResults {
 			subCtx.History = append(subCtx.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
@@ -1149,9 +1151,116 @@ func joinStrings(strs []string, sep string) string {
 	return result
 }
 
-// executeTools 执行Tools
+// executeTools 执行Tools（带名称解析）
 func (l *ReActLoop) executeTools(ctx context.Context, calls []llm.ToolCall) []llm.ToolResult {
+	// 在执行前解析工具参数中的名称为ID
+	l.resolveToolNames(ctx, calls)
 	return l.tools.ExecuteTools(ctx, calls)
+}
+
+// resolveToolNames 解析工具调用参数中的名称为实体ID
+// 当 LLM 使用角色名或场景名而非 ID 时，自动查找并替换为正确的 ID
+func (l *ReActLoop) resolveToolNames(ctx context.Context, calls []llm.ToolCall) {
+	log := l.getLogger()
+	for _, call := range calls {
+		l.resolveSingleCallNames(ctx, call)
+	}
+	_ = log
+}
+
+// resolveSingleCallNames 解析单个工具调用的名称参数
+func (l *ReActLoop) resolveSingleCallNames(ctx context.Context, call llm.ToolCall) {
+	if call.Arguments == nil {
+		return
+	}
+
+	// 解析 actor_id
+	if val, ok := call.Arguments["actor_id"].(string); ok && val != "" {
+		if resolved := l.resolveActorName(ctx, val); resolved != "" {
+			call.Arguments["actor_id"] = resolved
+		}
+	}
+	// 解析 caster_id
+	if val, ok := call.Arguments["caster_id"].(string); ok && val != "" {
+		if resolved := l.resolveActorName(ctx, val); resolved != "" {
+			call.Arguments["caster_id"] = resolved
+		}
+	}
+	// 解析 pc_id
+	if val, ok := call.Arguments["pc_id"].(string); ok && val != "" {
+		if resolved := l.resolveActorName(ctx, val); resolved != "" {
+			call.Arguments["pc_id"] = resolved
+		}
+	}
+	// 解析 target_actor_id
+	if val, ok := call.Arguments["target_actor_id"].(string); ok && val != "" {
+		if resolved := l.resolveActorName(ctx, val); resolved != "" {
+			call.Arguments["target_actor_id"] = resolved
+		}
+	}
+	// 解析 scene_id
+	if val, ok := call.Arguments["scene_id"].(string); ok && val != "" {
+		if resolved := l.resolveSceneName(ctx, val); resolved != "" {
+			call.Arguments["scene_id"] = resolved
+		}
+	}
+}
+
+// resolveActorName 将角色名称解析为 actor_id
+func (l *ReActLoop) resolveActorName(ctx context.Context, nameOrID string) string {
+	// 如果已经是 ID 格式，直接返回
+	if strings.HasPrefix(nameOrID, "01") || strings.HasPrefix(nameOrID, "actor_") {
+		return nameOrID
+	}
+
+	// 先从 KnownEntityIDs 中查找（按名称映射）
+	if l.state.agentContext != nil {
+		for key, id := range l.state.agentContext.KnownEntityIDs {
+			if strings.HasSuffix(key, "_name") && strings.EqualFold(l.state.agentContext.KnownEntityIDs[key], nameOrID) {
+				return id
+			}
+		}
+	}
+
+	// 通过引擎查询
+	result, err := l.engine.ListActors(ctx, engine.ListActorsRequest{
+		GameID: l.state.GameID,
+	})
+	if err != nil || result == nil {
+		return nameOrID
+	}
+
+	// 按名称匹配
+	for _, actor := range result.Actors {
+		if strings.EqualFold(actor.Name, nameOrID) {
+			return string(actor.ID)
+		}
+	}
+
+	// 未找到，返回原始值（让工具自己处理错误）
+	return nameOrID
+}
+
+// resolveSceneName 将场景名称解析为 scene_id
+func (l *ReActLoop) resolveSceneName(ctx context.Context, nameOrID string) string {
+	if strings.HasPrefix(nameOrID, "01") || strings.HasPrefix(nameOrID, "scene_") {
+		return nameOrID
+	}
+
+	result, err := l.engine.ListScenes(ctx, engine.ListScenesRequest{
+		GameID: l.state.GameID,
+	})
+	if err != nil || result == nil {
+		return nameOrID
+	}
+
+	for _, scene := range result.Scenes {
+		if strings.EqualFold(scene.Name, nameOrID) {
+			return string(scene.ID)
+		}
+	}
+
+	return nameOrID
 }
 
 // GetHistory 获取对话历史

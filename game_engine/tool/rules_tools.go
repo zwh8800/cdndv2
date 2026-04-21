@@ -316,7 +316,7 @@ func NewGetPassivePerceptionTool(e *engine.Engine) *GetPassivePerceptionTool {
 	return &GetPassivePerceptionTool{
 		EngineTool: *NewEngineTool(
 			"get_passive_perception",
-			"获取角色的被动感知值",
+			"获取角色的被动感知（Passive Perception）值，用于判断是否自动发现隐藏事物。Use when: 需要确认角色是否自动察觉到隐藏的门、陷阱或潜行的敌人。Do NOT use when: 需要主动进行感知检定（用 perform_skill_check，这是 write 操作）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -550,7 +550,7 @@ func NewGetSpellSlotsTool(e *engine.Engine) *GetSpellSlotsTool {
 	return &GetSpellSlotsTool{
 		EngineTool: *NewEngineTool(
 			"get_spell_slots",
-			"获取施法者的法术位状态",
+			"获取施法者当前各环级剩余法术位数量。Use when: 需要确认施法者还能施放几个法术、还有几环法术位可用；玩家询问'我还有几个法术位'。Do NOT use when: 需要施放法术（用 cast_spell，这是 write 操作）；需要查询法术数据（用 list_spells/get_spell）。",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{

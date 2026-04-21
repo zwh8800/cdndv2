@@ -31,11 +31,13 @@ func NewCreatePCTool(e *engine.Engine) *CreatePCTool {
 					},
 					"race": map[string]any{
 						"type":        "string",
-						"description": "种族 (human, elf, dwarf, halfling, dragonborn, gnome, half-elf, half-orc, tiefling)",
+						"description": "种族名称，必须使用以下中文标准名之一",
+						"enum":        []string{"人类", "精灵", "矮人", "半身人", "龙裔", "侏儒", "半精灵", "半兽人", "提夫林"},
 					},
 					"class": map[string]any{
 						"type":        "string",
-						"description": "主职业 (野蛮人, 吟游诗人, 牧师, 德鲁伊, 战士, 武僧, 圣武士, 游侠, 游荡者, 术士, 邪术师, 法师)",
+						"description": "主职业，必须使用以下中文标准名之一",
+						"enum":        []string{"野蛮人", "吟游诗人", "牧师", "德鲁伊", "战士", "武僧", "圣武士", "游侠", "游荡者", "术士", "邪术师", "法师"},
 					},
 					"level": map[string]any{
 						"type":        "integer",
@@ -57,7 +59,8 @@ func NewCreatePCTool(e *engine.Engine) *CreatePCTool {
 					},
 					"background": map[string]any{
 						"type":        "string",
-						"description": "背景（可选）",
+						"description": "背景名称，必须使用以下中文标准名之一",
+						"enum":        []string{"侍僧", "罪犯", "学者", "士兵"},
 					},
 					"alignment": map[string]any{
 						"type":        "string",

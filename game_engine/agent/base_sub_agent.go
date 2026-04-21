@@ -25,6 +25,8 @@ type SubAgentConfig struct {
 	Priority     int      // 处理优先级
 	Dependencies []string // 依赖的其他Agent名称
 	Keywords     []string // CanHandle关键词列表
+	// ExtraTemplateData 用于动态注入额外的模板数据，返回的键值对会合并到模板数据中
+	ExtraTemplateData func(ctx *AgentContext) map[string]any
 }
 
 // BaseSubAgent 子Agent基类，提供公共逻辑
@@ -311,6 +313,13 @@ func (a *BaseSubAgent) prepareTemplateData(ctx *AgentContext) map[string]any {
 		data["KnownEntityIDs"] = formatKnownEntityIDs(ctx.KnownEntityIDs)
 	} else {
 		data["KnownEntityIDs"] = ""
+	}
+
+	// 调用扩展函数注入额外的模板数据
+	if a.config.ExtraTemplateData != nil {
+		for k, v := range a.config.ExtraTemplateData(ctx) {
+			data[k] = v
+		}
 	}
 
 	return data

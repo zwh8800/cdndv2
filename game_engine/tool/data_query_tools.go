@@ -70,7 +70,7 @@ func NewGetRaceTool(e *engine.Engine) *GetRaceTool {
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"name": map[string]any{"type": "string", "description": "种族名称"},
+					"name": map[string]any{"type": "string", "description": "种族名称，必须使用中文标准名（如：人类、精灵、矮人、半身人、龙裔、侏儒、半精灵、半兽人、提夫林）"},
 				},
 				"required": []string{"name"},
 			},
@@ -242,7 +242,7 @@ func NewGetBackgroundTool(e *engine.Engine) *GetBackgroundTool {
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"id": map[string]any{"type": "string", "description": "背景ID"},
+					"id": map[string]any{"type": "string", "description": "背景ID或中文名称（如：侍僧、罪犯、学者、士兵）"},
 				},
 				"required": []string{"id"},
 			},

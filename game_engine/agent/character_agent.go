@@ -1,6 +1,12 @@
 package agent
 
 import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/zwh8800/dnd-core/pkg/data"
+
 	"github.com/zwh8800/cdndv2/game_engine/llm"
 	"github.com/zwh8800/cdndv2/game_engine/tool"
 )
@@ -28,6 +34,54 @@ func NewCharacterAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *Ch
 				"add_experience", "level_up", "short_rest", "long_rest",
 				"character", "角色", "创建", "升级", "经验", "休息",
 			},
+			ExtraTemplateData: func(ctx *AgentContext) map[string]any {
+				return map[string]any{
+					"RaceList":       formatRaceList(),
+					"ClassList":      formatClassList(),
+					"BackgroundList": formatBackgroundList(),
+				}
+			},
 		}, registry, llmClient),
 	}
+}
+
+// formatRaceList 格式化种族列表，包含子种族信息
+func formatRaceList() string {
+	names := data.GetRaceNames()
+	sort.Strings(names)
+	var parts []string
+	for _, name := range names {
+		race := data.GetRace(name)
+		if race == nil {
+			continue
+		}
+		if len(race.Subraces) > 0 {
+			parts = append(parts, fmt.Sprintf("- %s（子种族：%s）", name, strings.Join(race.Subraces, "、")))
+		} else {
+			parts = append(parts, fmt.Sprintf("- %s", name))
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// formatClassList 格式化职业列表
+func formatClassList() string {
+	names := data.GetClassNames()
+	sort.Strings(names)
+	var parts []string
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("- %s", name))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// formatBackgroundList 格式化背景列表
+func formatBackgroundList() string {
+	names := data.GetBackgroundNames()
+	sort.Strings(names)
+	var parts []string
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("- %s", name))
+	}
+	return strings.Join(parts, "\n")
 }

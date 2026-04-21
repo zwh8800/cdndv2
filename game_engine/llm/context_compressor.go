@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -21,6 +22,10 @@ type ContextCompressor struct {
 	// 一个"轮次"定义为从一条 user message 开始，到下一条 user message（不含）为止
 	RecentKeepRounds int
 
+	// LLMClient 用于生成结构化摘要的 LLM 客户端
+	// 当为 nil 时回退到启发式截断压缩
+	llmClient LLMClient
+
 	// Token 估算校准
 	lastActualTokens    int     // 上次 API 返回的实际 prompt token 数
 	lastEstimatedTokens int     // 上次估算值
@@ -34,11 +39,13 @@ type ContextCompressor struct {
 }
 
 // DefaultContextCompressor 创建默认配置的压缩器
-func DefaultContextCompressor() *ContextCompressor {
+// llmClient 用于 LLM 驱动的结构化摘要，传 nil 则回退到启发式截断
+func DefaultContextCompressor(llmClient LLMClient) *ContextCompressor {
 	return &ContextCompressor{
 		ContextWindowSize: 128000, // gpt-4o default
 		CompressThreshold: 0.75,
 		RecentKeepRounds:  3,
+		llmClient:         llmClient,
 		calibrationRatio:  1.3, // 偏保守，后续通过实际 token 反馈动态调整
 	}
 }
@@ -172,7 +179,7 @@ func (c *ContextCompressor) IsCompressing() bool {
 // StartAsyncCompress 启动后台异步压缩
 // 传入当前历史的快照（copy），在后台执行压缩
 // 压缩完成后结果存入 compressedResult，等待下次调用 ApplyCompressedIfReady 时替换
-func (c *ContextCompressor) StartAsyncCompress(historySnapshot []Message) {
+func (c *ContextCompressor) StartAsyncCompress(ctx context.Context, historySnapshot []Message) {
 	c.mu.Lock()
 	if c.compressing {
 		c.mu.Unlock()
@@ -183,7 +190,10 @@ func (c *ContextCompressor) StartAsyncCompress(historySnapshot []Message) {
 	c.mu.Unlock()
 
 	go func() {
-		compressed := c.CompressHistory(historySnapshot)
+		// 后台压缩使用独立的 context，避免原始请求超时取消压缩
+		bgCtx := context.Background()
+		_ = ctx // 原始 context 仅作为参考，后台任务用独立 context
+		compressed := c.CompressHistory(bgCtx, historySnapshot)
 
 		c.mu.Lock()
 		c.compressedResult = compressed
@@ -214,10 +224,10 @@ func (c *ContextCompressor) ApplyCompressedIfReady() []Message {
 // 策略：
 // 1. 按"对话轮次"划分历史（每个轮次从 user message 开始）
 // 2. 保留最近 RecentKeepRounds 个完整轮次不动
-// 3. 对较早的轮次，按消息段分类压缩（用户输入、工具调用序列、助手响应）
+// 3. 对较早的轮次，两级压缩：先 Prune 工具输出，再 LLM 结构化摘要
 // 4. D&D 领域感知：查询类工具激进压缩，动作类工具保守压缩
 // 返回压缩后的消息列表
-func (c *ContextCompressor) CompressHistory(messages []Message) []Message {
+func (c *ContextCompressor) CompressHistory(ctx context.Context, messages []Message) []Message {
 	rounds := c.identifyRounds(messages)
 
 	keepRounds := c.RecentKeepRounds
@@ -247,7 +257,7 @@ func (c *ContextCompressor) CompressHistory(messages []Message) []Message {
 	}
 
 	// 压缩旧消息
-	compressed := c.compressOldMessages(oldMessages)
+	compressed := c.compressOldMessages(ctx, oldMessages)
 
 	// 合并压缩后的消息和最近消息
 	result := make([]Message, 0, len(compressed)+len(recentMessages))
@@ -294,34 +304,31 @@ func (c *ContextCompressor) identifyRounds(messages []Message) []conversationRou
 
 // --- 消息压缩 ---
 
-// compressOldMessages 压缩旧消息
-func (c *ContextCompressor) compressOldMessages(messages []Message) []Message {
+// compressOldMessages 压缩旧消息（两级压缩策略）
+// Level 1: Prune - 修剪大型工具输出，减少发送给摘要 LLM 的 token 量
+// Level 2: LLM Summarize - 用 LLM 生成结构化摘要，失败时回退到启发式摘要
+func (c *ContextCompressor) compressOldMessages(ctx context.Context, messages []Message) []Message {
 	if len(messages) == 0 {
 		return nil
 	}
 
-	// 将消息分组为"对话段"
-	segments := c.segmentMessages(messages)
+	// Level 1: Prune - 修剪大型工具输出
+	pruned := c.pruneOldMessages(messages)
 
-	// 压缩每个段为简短摘要
-	var summaryParts []string
-	for _, seg := range segments {
-		summary := c.summarizeSegment(seg)
-		if summary != "" {
-			summaryParts = append(summaryParts, summary)
+	// Level 2: LLM Summarize
+	if c.llmClient != nil {
+		summary, err := c.summarizeWithLLM(ctx, pruned)
+		if err == nil && summary != "" {
+			summaryContent := fmt.Sprintf("[\u5386\u53f2\u4e0a\u4e0b\u6587\u6458\u8981 - \u4ee5\u4e0b\u662f\u4e4b\u524d\u5bf9\u8bdd\u7684\u7ed3\u6784\u5316\u538b\u7f29\u7248\u672c]\n%s", summary)
+			return []Message{
+				NewSystemMessage(summaryContent),
+			}
 		}
+		// LLM 摘要失败，回退到启发式摘要
 	}
 
-	if len(summaryParts) == 0 {
-		return nil
-	}
-
-	// 生成一条压缩摘要消息（使用 system message，避免 LLM 误解为玩家输入）
-	summaryContent := fmt.Sprintf("[历史上下文摘要 - 以下是之前对话的压缩版本]\n%s", strings.Join(summaryParts, "\n"))
-
-	return []Message{
-		NewSystemMessage(summaryContent),
-	}
+	// 回退：启发式摘要（当 LLMClient 为 nil 或 LLM 调用失败时）
+	return c.compressOldMessagesHeuristic(pruned)
 }
 
 // messageSegment 消息段（一组相关的消息）
@@ -397,7 +404,7 @@ func (c *ContextCompressor) segmentMessages(messages []Message) []messageSegment
 	return segments
 }
 
-// summarizeSegment 将一个消息段压缩为简短摘要
+// summarizeSegment 将一个消息段压缩为简短摘要（启发式回退方案）
 func (c *ContextCompressor) summarizeSegment(seg messageSegment) string {
 	switch seg.segType {
 	case segTypeUserInput:
@@ -524,4 +531,197 @@ func containsEntityID(content string) bool {
 		}
 	}
 	return false
+}
+
+// --- Level 1: Prune - 修剪大型工具输出 ---
+
+// pruneOldMessages 修剪旧消息中的大型工具输出
+// - 查询类工具结果替换为元信息标注
+// - 大型工具输出（>500 token）截断保留前 100 token
+// - 工具调用参数中的大 JSON（>200 token）截断
+func (c *ContextCompressor) pruneOldMessages(messages []Message) []Message {
+	pruned := make([]Message, len(messages))
+
+	// 收集当前批次中所有工具名，用于将 tool result 匹配到工具类型
+	toolCallNames := make(map[string]string) // toolCallID -> toolName
+	for _, msg := range messages {
+		if msg.Role == RoleAssistant {
+			for _, tc := range msg.ToolCalls {
+				toolCallNames[tc.ID] = tc.Name
+			}
+		}
+	}
+
+	for i, msg := range messages {
+		switch msg.Role {
+		case RoleTool:
+			// 确定对应的工具名
+			toolName := toolCallNames[msg.Name]
+			if isQueryTool(toolName) {
+				// 查询类工具：激进压缩，只保留元信息
+				pruned[i] = Message{
+					Role:    msg.Role,
+					Content: fmt.Sprintf("[\u67e5\u8be2\u7ed3\u679c\u5df2\u7701\u7565\uff0c\u5de5\u5177: %s\uff0c\u53ef\u901a\u8fc7 GameSummary \u6062\u590d]", toolName),
+					Name:    msg.Name,
+				}
+			} else {
+				// 动作类工具：如果输出过大则截断
+				prunedMsg := msg
+				tokens := estimateStringTokens(msg.Content)
+				if tokens > 500 {
+					// 保留前 ~100 token 对应的字符数（约 400 字符）
+					keepChars := 400
+					if len(msg.Content) > keepChars {
+						prunedMsg.Content = msg.Content[:keepChars] + fmt.Sprintf("\n...[\u5df2\u622a\u65ad\uff0c\u539f\u59cb\u7ea6 %d tokens]", tokens)
+					}
+				}
+				pruned[i] = prunedMsg
+			}
+
+		case RoleAssistant:
+			// 修剪工具调用参数中的大 JSON
+			prunedMsg := msg
+			if len(msg.ToolCalls) > 0 {
+				newToolCalls := make([]ToolCall, len(msg.ToolCalls))
+				for j, tc := range msg.ToolCalls {
+					newTC := tc
+					// 检查每个参数值的大小
+					for k, v := range tc.Arguments {
+						vStr := fmt.Sprintf("%v", v)
+						if estimateStringTokens(vStr) > 200 {
+							if newTC.Arguments == nil {
+								newTC.Arguments = make(map[string]any)
+								for kk, vv := range tc.Arguments {
+									newTC.Arguments[kk] = vv
+								}
+							}
+							if len(vStr) > 200 {
+								newTC.Arguments[k] = vStr[:200] + "...[\u5df2\u622a\u65ad]"
+							}
+						}
+					}
+					newToolCalls[j] = newTC
+				}
+				prunedMsg.ToolCalls = newToolCalls
+			}
+			pruned[i] = prunedMsg
+
+		default:
+			pruned[i] = msg
+		}
+	}
+
+	return pruned
+}
+
+// --- Level 2: LLM 结构化摘要 ---
+
+// compactionSystemPrompt D&D 专属结构化摘要 prompt
+const compactionSystemPrompt = `你是一个D&D游戏会话的上下文压缩器。请将以下对话历史压缩为结构化摘要，用于让DM（地下城主）AI继续游戏。
+
+必须包含以下部分（如果存在）：
+1. 【情节进展】当前故事线和关键剧情事件
+2. 【玩家行动】玩家做出的重要决策和行动
+3. 【战斗/遭遇】进行中或已完成的战斗，关键结果（伤害、击杀、状态效果）
+4. 【NPC交互】与NPC的重要对话和关系变化
+5. 【物品/状态变更】获得/失去的物品、状态变化、位置移动
+6. 【待处理事项】进行中但未完成的任务或悬而未决的情况
+7. 【关键ID引用】涉及的重要实体ID（角色、场景、物品等）
+
+要求：
+- 保留所有实体ID（格式如 01HXXXXXX）
+- 保留数值结果（骰子结果、HP变化等）
+- 用简洁的条目式表达，不要叙事性文字
+- 如果某个部分没有相关内容，跳过该部分`
+
+// summarizeWithLLM 使用 LLM 生成结构化摘要
+func (c *ContextCompressor) summarizeWithLLM(ctx context.Context, messages []Message) (string, error) {
+	// 将消息格式化为可读文本
+	userPrompt := c.buildSummarizationPrompt(messages)
+
+	req := &CompletionRequest{
+		Messages: []Message{
+			NewSystemMessage(compactionSystemPrompt),
+			NewUserMessage(userPrompt),
+		},
+		Temperature: 0, // 确保摘要确定性
+		MaxTokens:   2000,
+	}
+
+	resp, err := c.llmClient.Complete(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("LLM summarization failed: %w", err)
+	}
+
+	if resp.Content == "" {
+		return "", fmt.Errorf("LLM returned empty summary")
+	}
+
+	return resp.Content, nil
+}
+
+// buildSummarizationPrompt 将消息列表格式化为可读文本，作为摘要 LLM 的用户输入
+func (c *ContextCompressor) buildSummarizationPrompt(messages []Message) string {
+	var sb strings.Builder
+	sb.WriteString("请压缩以下对话历史。这些消息将被摘要替换，摘要将是继续游戏的唯一上下文，请保留所有关键信息。\n\n---\n")
+
+	for _, msg := range messages {
+		switch msg.Role {
+		case RoleUser:
+			sb.WriteString(fmt.Sprintf("\n[玩家]: %s\n", msg.Content))
+
+		case RoleAssistant:
+			if msg.Content != "" {
+				sb.WriteString(fmt.Sprintf("\n[DM]: %s\n", msg.Content))
+			}
+			if len(msg.ToolCalls) > 0 {
+				for _, tc := range msg.ToolCalls {
+					// 简化参数显示
+					var argParts []string
+					for k, v := range tc.Arguments {
+						argParts = append(argParts, fmt.Sprintf("%s=%v", k, v))
+					}
+					sb.WriteString(fmt.Sprintf("[DM 调用工具]: %s(%s)\n", tc.Name, strings.Join(argParts, ", ")))
+				}
+			}
+
+		case RoleTool:
+			sb.WriteString(fmt.Sprintf("[工具结果]: %s\n", msg.Content))
+
+		case RoleSystem:
+			sb.WriteString(fmt.Sprintf("[系统]: %s\n", msg.Content))
+		}
+	}
+
+	sb.WriteString("\n---\n请按照指定格式生成结构化摘要。")
+	return sb.String()
+}
+
+// --- 启发式摘要回退方案 ---
+
+// compressOldMessagesHeuristic 启发式摘要（当 LLMClient 为 nil 或 LLM 调用失败时的回退方案）
+func (c *ContextCompressor) compressOldMessagesHeuristic(messages []Message) []Message {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	segments := c.segmentMessages(messages)
+
+	var summaryParts []string
+	for _, seg := range segments {
+		summary := c.summarizeSegment(seg)
+		if summary != "" {
+			summaryParts = append(summaryParts, summary)
+		}
+	}
+
+	if len(summaryParts) == 0 {
+		return nil
+	}
+
+	summaryContent := fmt.Sprintf("[\u5386\u53f2\u4e0a\u4e0b\u6587\u6458\u8981 - \u4ee5\u4e0b\u662f\u4e4b\u524d\u5bf9\u8bdd\u7684\u538b\u7f29\u7248\u672c]\n%s", strings.Join(summaryParts, "\n"))
+
+	return []Message{
+		NewSystemMessage(summaryContent),
+	}
 }

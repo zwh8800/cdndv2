@@ -87,7 +87,7 @@ func NewReActLoop(
 		llm:        llmClient,
 		maxIter:    maxIter,
 		useRouter:  router != nil,
-		compressor: llm.DefaultContextCompressor(),
+		compressor: llm.DefaultContextCompressor(llmClient),
 		state: &LoopState{
 			CurrentPhase: PhaseObserve,
 			History:      make([]llm.Message, 0),
@@ -145,7 +145,7 @@ func (l *ReActLoop) maybeCompressHistory() {
 		// 拷贝当前历史快照，启动后台压缩
 		snapshot := make([]llm.Message, len(l.state.History))
 		copy(snapshot, l.state.History)
-		l.compressor.StartAsyncCompress(snapshot)
+		l.compressor.StartAsyncCompress(context.Background(), snapshot)
 		log.Info("Async compression started in background",
 			zap.Int("historyMessages", len(snapshot)),
 			zap.Int("estimatedTokens", l.compressor.EstimateTokens(snapshot)),

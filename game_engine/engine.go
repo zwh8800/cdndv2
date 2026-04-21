@@ -138,7 +138,7 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	reactLoop.SetLogger(logger)
 
 	// 配置上下文压缩器
-	compressor := llm.DefaultContextCompressor()
+	compressor := llm.DefaultContextCompressor(llmClient)
 	if cfg.LLMConfig.ContextWindowSize > 0 {
 		compressor.ContextWindowSize = cfg.LLMConfig.ContextWindowSize
 	}

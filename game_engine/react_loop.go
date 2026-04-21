@@ -839,7 +839,11 @@ func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubA
 	}
 }
 
+// subSessionParentContextMessages 从父会话历史中提取的上下文消息数量上限
+const subSessionParentContextMessages = 20
+
 // createSubSession 创建隔离的子会话上下文
+// 从父会话历史中提取最近的有意义对话作为上下文，让 SubAgent 了解之前发生了什么
 func (l *ReActLoop) createSubSession(parentCtx *agent.AgentContext) *agent.AgentContext {
 	if parentCtx == nil {
 		return agent.NewAgentContext("", "", l.engine)
@@ -848,8 +852,8 @@ func (l *ReActLoop) createSubSession(parentCtx *agent.AgentContext) *agent.Agent
 		GameID:       parentCtx.GameID,
 		PlayerID:     parentCtx.PlayerID,
 		Engine:       parentCtx.Engine,
-		History:      make([]llm.Message, 0), // 独立历史
-		CurrentState: parentCtx.CurrentState, // 共享游戏状态（只读）
+		History:      l.extractParentContext(parentCtx.History), // 从父历史提取上下文
+		CurrentState: parentCtx.CurrentState,                    // 共享游戏状态（只读）
 		Metadata:     make(map[string]any),
 		Parent:       parentCtx, // 链接父会话
 		IsSubSession: true,
@@ -862,6 +866,59 @@ func (l *ReActLoop) createSubSession(parentCtx *agent.AgentContext) *agent.Agent
 		}
 	}
 	return subCtx
+}
+
+// extractParentContext 从父会话历史中提取最近的有意义对话消息
+// 只保留 user 和 assistant（有内容且无tool_calls）消息，过滤掉 tool/system 消息
+// 这些消息以 "对话上下文" 的形式传递给 SubAgent，帮助其理解当前情境
+func (l *ReActLoop) extractParentContext(parentHistory []llm.Message) []llm.Message {
+	if len(parentHistory) == 0 {
+		return make([]llm.Message, 0)
+	}
+
+	// 从后往前扫描，收集有意义的消息（user 和有内容的 assistant）
+	var relevant []llm.Message
+	for i := len(parentHistory) - 1; i >= 0 && len(relevant) < subSessionParentContextMessages; i-- {
+		msg := parentHistory[i]
+		switch msg.Role {
+		case llm.RoleUser:
+			if msg.Content != "" {
+				relevant = append(relevant, msg)
+			}
+		case llm.RoleAssistant:
+			// 只保留有实际内容的 assistant 消息（跳过纯 tool_calls 的）
+			if msg.Content != "" && len(msg.ToolCalls) == 0 {
+				relevant = append(relevant, msg)
+			}
+		}
+	}
+
+	if len(relevant) == 0 {
+		return make([]llm.Message, 0)
+	}
+
+	// 反转为时间顺序
+	for i, j := 0, len(relevant)-1; i < j; i, j = i+1, j-1 {
+		relevant[i], relevant[j] = relevant[j], relevant[i]
+	}
+
+	// 用一条 user 消息包装为上下文摘要，避免 SubAgent 把这些当成自己的对话历史
+	var contextParts []string
+	for _, msg := range relevant {
+		switch msg.Role {
+		case llm.RoleUser:
+			contextParts = append(contextParts, "玩家: "+msg.Content)
+		case llm.RoleAssistant:
+			contextParts = append(contextParts, "DM: "+msg.Content)
+		}
+	}
+
+	contextMsg := llm.NewUserMessage(
+		"[最近对话上下文 - 以下是主会话中最近的对话记录，请基于此理解当前情境]\n" +
+			joinStrings(contextParts, "\n"),
+	)
+
+	return []llm.Message{contextMsg}
 }
 
 // populateKnownEntityIDsFromSummary 从游戏状态摘要中提取已知实体ID

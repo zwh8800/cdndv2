@@ -159,9 +159,11 @@ func registerAgentTools(registry *tool.ToolRegistry, engine *engine.Engine) {
 	// 只读 - MainAgent + SubAgent
 	registry.Register(tool.NewGetCraftingRecipesTool(engine), []string{agent.SubAgentNameCrafting, agent.MainAgentName}, "crafting")
 
-	// ========== 游戏阶段管理工具 ==========
-	// 写操作 - MainAgent + character_agent（角色创建完成后需要推进阶段）
-	registry.Register(tool.NewSetPhaseTool(engine), []string{agent.MainAgentName, agent.SubAgentNameCharacter, agent.SubAgentNameCombat, agent.SubAgentNameRules}, "phase")
+// ========== 游戏阶段管理工具 ==========
+// 注意：set_phase 是 write_flow 类操作（流程控制），而非 write_rule 类操作（D&D规则运算）。
+// 按照架构设计，write_flow 允许 MainAgent 直接调用，write_rule 必须通过 delegate_task 委派。
+// 这是目前唯一允许 MainAgent 直接调用的写操作工具，因为 Phase 推进属于游戏流程管理而非规则计算。
+registry.Register(tool.NewSetPhaseTool(engine), []string{agent.MainAgentName, agent.SubAgentNameCharacter, agent.SubAgentNameCombat, agent.SubAgentNameRules}, "phase")
 	// 只读 - MainAgent + SubAgent
 	registry.Register(tool.NewGetPhaseTool(engine), []string{agent.MainAgentName, agent.SubAgentNameCharacter, agent.SubAgentNameCombat, agent.SubAgentNameRules}, "phase")
 

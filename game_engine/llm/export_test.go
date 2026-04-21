@@ -55,9 +55,11 @@ func (c *ContextCompressor) ExportSegmentMessages(msgs []Message) int {
 	return len(c.segmentMessages(msgs))
 }
 
-// ExportIsQueryTool 暴露 isQueryTool
+// ExportIsQueryTool 暴露 isQueryTool 方法（现在需要 ContextCompressor 实例）
+// 向后兼容：创建一个无 registry 的压缩器，回退到前缀匹配行为
 func ExportIsQueryTool(name string) bool {
-	return isQueryTool(name)
+	c := &ContextCompressor{}
+	return c.isQueryTool(name)
 }
 
 // ExportContainsEntityID 暴露 containsEntityID

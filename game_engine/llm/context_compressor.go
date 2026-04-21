@@ -26,6 +26,10 @@ type ContextCompressor struct {
 	// 当为 nil 时回退到启发式截断压缩
 	llmClient LLMClient
 
+	// toolRegistry 用于判断工具是否为只读（查询类）工具
+	// 当为 nil 时回退到名称前缀启发式判断
+	toolRegistry ToolReadOnlyChecker
+
 	// Token 估算校准
 	lastActualTokens    int     // 上次 API 返回的实际 prompt token 数
 	lastEstimatedTokens int     // 上次估算值
@@ -38,6 +42,14 @@ type ContextCompressor struct {
 	compressedReady  bool      // 压缩结果是否就绪
 }
 
+// ToolReadOnlyChecker 用于查询工具是否为只读工具的接口
+// 定义在 llm 包中以避免循环依赖（llm 不导入 tool 包）
+type ToolReadOnlyChecker interface {
+	// IsToolReadOnly 返回指定工具名是否为只读工具
+	// 第一个返回值为是否只读，第二个返回值为是否找到该工具
+	IsToolReadOnly(toolName string) (bool, bool)
+}
+
 // DefaultContextCompressor 创建默认配置的压缩器
 // llmClient 用于 LLM 驱动的结构化摘要，传 nil 则回退到启发式截断
 func DefaultContextCompressor(llmClient LLMClient) *ContextCompressor {
@@ -48,6 +60,12 @@ func DefaultContextCompressor(llmClient LLMClient) *ContextCompressor {
 		llmClient:         llmClient,
 		calibrationRatio:  1.3, // 偏保守，后续通过实际 token 反馈动态调整
 	}
+}
+
+// SetToolReadOnlyChecker 设置工具只读检查器
+// 用于判断工具是否为查询类（只读）工具，以决定压缩策略
+func (c *ContextCompressor) SetToolReadOnlyChecker(checker ToolReadOnlyChecker) {
+	c.toolRegistry = checker
 }
 
 // --- Token 估算 ---
@@ -435,10 +453,17 @@ func (c *ContextCompressor) summarizeSegment(seg messageSegment) string {
 // --- D&D 领域感知的工具分类压缩 ---
 
 // queryToolPrefixes 查询类工具前缀（结果可从 GameSummary 恢复，可激进压缩）
+// 当 ToolReadOnlyChecker 未设置时作为回退启发式判断
 var queryToolPrefixes = []string{"get_", "list_", "query_"}
 
 // isQueryTool 判断是否为查询类工具（结果可从 CollectSummary 恢复）
-func isQueryTool(name string) bool {
+// 优先使用 ToolReadOnlyChecker 判断，回退到名称前缀启发式
+func (c *ContextCompressor) isQueryTool(name string) bool {
+	if c.toolRegistry != nil {
+		if isReadOnly, found := c.toolRegistry.IsToolReadOnly(name); found {
+			return isReadOnly
+		}
+	}
 	for _, prefix := range queryToolPrefixes {
 		if strings.HasPrefix(name, prefix) {
 			return true
@@ -462,7 +487,7 @@ func (c *ContextCompressor) summarizeToolSequence(messages []Message) string {
 	for _, msg := range messages {
 		if msg.Role == RoleAssistant {
 			for _, tc := range msg.ToolCalls {
-				if isQueryTool(tc.Name) {
+				if c.isQueryTool(tc.Name) {
 					queryTools = append(queryTools, tc.Name)
 				} else {
 					actionTools = append(actionTools, tc.Name)
@@ -557,7 +582,7 @@ func (c *ContextCompressor) pruneOldMessages(messages []Message) []Message {
 		case RoleTool:
 			// 确定对应的工具名
 			toolName := toolCallNames[msg.Name]
-			if isQueryTool(toolName) {
+			if c.isQueryTool(toolName) {
 				// 查询类工具：激进压缩，只保留元信息
 				pruned[i] = Message{
 					Role:    msg.Role,

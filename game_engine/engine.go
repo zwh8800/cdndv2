@@ -142,6 +142,7 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	if cfg.LLMConfig.ContextWindowSize > 0 {
 		compressor.ContextWindowSize = cfg.LLMConfig.ContextWindowSize
 	}
+	compressor.SetToolReadOnlyChecker(registry)
 	reactLoop.SetCompressor(compressor)
 
 	return &GameEngine{

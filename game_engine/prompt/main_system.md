@@ -21,23 +21,21 @@
 
 {{.GameState}}
 
-# 可用能力
-
-## 可用Tools（只读查询）
-
-以下工具你可以直接调用，它们不会修改游戏状态，仅用于查询信息：
-
-{{range .ReadOnlyTools}}
-- `{{.Name}}`: {{.Description}}
-{{end}}
-
-## 委托任务
+# 委托任务
 
 当你需要执行修改游戏状态的操作时，必须使用 `delegate_task` 工具将任务委托给专门的Agent：
 
-- **character_agent**: 角色管理专家 - 负责角色创建、更新、删除、经验
-- **combat_agent**: 战斗管理专家 - 负责战斗初始化、回合管理、攻击、伤害、治疗
-- **rules_agent**: 规则仲裁专家 - 负责检定、豁免、法术、专注、休息
+- **character_agent**: 角色管理 - 创建、更新、删除角色，经验值管理
+- **combat_agent**: 战斗管理 - 初始化战斗、回合推进、攻击、伤害、治疗、死亡豁免
+- **rules_agent**: 规则检定 - 能力检定、技能检定、豁免、施法、专注检定、休息
+- **inventory_agent**: 库存管理 - 物品增删、装备穿脱、物品转移、同调、货币
+- **narrative_agent**: 叙事与场景 - 场景创建/管理、场景连接、角色移动、旅行、探索、陷阱
+- **npc_agent**: NPC互动 - NPC交互、态度查询
+- **memory_agent**: 任务与记忆 - 任务创建/更新/完成、生活方式、游戏时间推进
+- **movement_agent**: 移动 - 跳跃、坠落伤害、窒息、遭遇检定
+- **mount_agent**: 坐骑 - 骑乘/下骑、坐骑速度计算
+- **crafting_agent**: 制作 - 开始/推进/完成制作、配方查询
+- **data_query_agent**: 数据查询 - 种族、职业、背景、怪物、法术、武器、护甲、魔法物品、专长等静态数据
 
 **使用方式**: 调用 `delegate_task` 工具，指定 agent_name 和 intent 参数。
 
@@ -45,6 +43,14 @@
 - 玩家说"我创建一个精灵法师" → `delegate_task(agent_name="character_agent", intent="创建1级精灵法师")`
 - 玩家说"我要攻击地精" → `delegate_task(agent_name="combat_agent", intent="攻击地精")`
 - 玩家说"我过个感知豁免" → `delegate_task(agent_name="rules_agent", intent="进行感知豁免检定")`
+- 玩家说"我要装备这把剑" → `delegate_task(agent_name="inventory_agent", intent="装备武器")`
+- 玩家说"描述一下周围环境" → `delegate_task(agent_name="narrative_agent", intent="获取当前场景详情")`
+- 玩家说"我想和村长对话" → `delegate_task(agent_name="npc_agent", intent="与村长NPC交互")`
+- 玩家说"查看我的任务" → `delegate_task(agent_name="memory_agent", intent="查看进行中的任务")`
+- 玩家说"我跳过深渊" → `delegate_task(agent_name="movement_agent", intent="进行跳跃检定")`
+- 玩家说"我骑上战马" → `delegate_task(agent_name="mount_agent", intent="骑乘坐骑")`
+- 玩家说"我要制作一把长剑" → `delegate_task(agent_name="crafting_agent", intent="开始制作长剑")`
+- 玩家说"火球术的数据是什么" → `delegate_task(agent_name="data_query_agent", intent="查询火球术详情")`
 
 **重要**: 你不能直接调用写操作工具（如创建角色、发起战斗、施法等），必须通过 `delegate_task` 委托。
 

@@ -20,9 +20,21 @@ func NewDelegateTaskTool() *DelegateTaskTool {
 		"type": "object",
 		"properties": map[string]any{
 			"agent_name": map[string]any{
-				"type":        "string",
-				"enum":        []string{"character_agent", "combat_agent", "rules_agent"},
-				"description": "要委托的Agent名称：character_agent(角色管理)、combat_agent(战斗管理)、rules_agent(规则检定)",
+				"type": "string",
+				"enum": []string{
+					"character_agent",
+					"combat_agent",
+					"rules_agent",
+					"inventory_agent",
+					"narrative_agent",
+					"npc_agent",
+					"memory_agent",
+					"movement_agent",
+					"mount_agent",
+					"crafting_agent",
+					"data_query_agent",
+				},
+				"description": "要委托的Agent名称，根据任务类型选择对应的专业Agent",
 			},
 			"intent": map[string]any{
 				"type":        "string",
@@ -39,7 +51,7 @@ func NewDelegateTaskTool() *DelegateTaskTool {
 	return &DelegateTaskTool{
 		BaseTool: BaseTool{
 			name:        DelegateTaskToolName,
-			description: "将任务委托给专门的Agent处理。用于角色管理、战斗操作、规则检定等专业任务。当你需要执行复杂的游戏操作时，使用此工具委托给对应的专家Agent。",
+			description: "将任务委托给专门的Agent处理。根据任务类型选择对应Agent：character_agent(角色创建/更新/经验)、combat_agent(战斗/攻击/伤害/治疗)、rules_agent(检定/豁免/法术/休息)、inventory_agent(物品/装备/货币)、narrative_agent(场景/探索/旅行/陷阱)、npc_agent(NPC交互)、memory_agent(任务/生活方式/时间)、movement_agent(跳跃/坠落/窒息)、mount_agent(骑乘/坐骑)、crafting_agent(制作)、data_query_agent(查询种族/职业/法术等静态数据)。",
 			schema:      schema,
 		},
 	}

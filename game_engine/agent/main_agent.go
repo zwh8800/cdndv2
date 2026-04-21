@@ -389,18 +389,6 @@ func (m *MainAgent) prepareTemplateData(ctx *AgentContext) map[string]any {
 		data["GameState"] = "游戏尚未开始"
 	}
 
-	// 只读工具信息（MainAgent 可直接调用）
-	readOnlyTools := m.registry.GetReadOnlyTools()
-	toolInfo := make([]map[string]string, 0, len(readOnlyTools))
-	for _, t := range readOnlyTools {
-		toolInfo = append(toolInfo, map[string]string{
-			"Name":        t.Name(),
-			"Description": t.Description(),
-		})
-	}
-	data["ReadOnlyTools"] = toolInfo
-	data["AvailableTools"] = toolInfo // 兼容旧模板
-
 	return data
 }
 

@@ -31,7 +31,7 @@ const (
 )
 
 // maxDelegationsPerRun 每次 ReAct 循环最大委托次数
-const maxDelegationsPerRun = 10
+const maxDelegationsPerRun = 15
 
 // LoopState 循环状态
 type LoopState struct {
@@ -43,6 +43,14 @@ type LoopState struct {
 	LastResult      *agent.AgentResponse
 	agentContext    *agent.AgentContext
 	delegationCount int
+	actionHistory   []ActionRecord
+}
+
+// ActionRecord 记录每次工具调用的名称、参数和结果摘要，用于幻觉循环检测
+type ActionRecord struct {
+	ToolName     string
+	Params       map[string]any
+	ResultDigest string
 }
 
 // ReActLoop ReAct循环控制器
@@ -78,7 +86,7 @@ func NewReActLoop(
 	llmClient llm.LLMClient,
 	maxIter int,
 ) *ReActLoop {
-	return &ReActLoop{
+	loop := &ReActLoop{
 		engine:     e,
 		mainAgent:  mainAgent,
 		router:     router,
@@ -94,6 +102,10 @@ func NewReActLoop(
 		},
 		logger: zap.NewNop(),
 	}
+
+	loop.compressor.SetToolReadOnlyChecker(tools)
+
+	return loop
 }
 
 // SetLogger 设置日志器
@@ -530,6 +542,20 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 			l.state.agentContext.History = l.state.History
 		}
 
+		// 幻觉循环检测：记录 delegate_task 调用
+		for _, dtc := range result.DelegateToolCalls {
+			l.recordAction(dtc.Name, dtc.Arguments, nil)
+		}
+		for _, tc := range result.ToolCalls {
+			l.recordAction(tc.Name, tc.Arguments, nil)
+		}
+		if l.detectHallucinationLoop() {
+			log.Warn("Hallucination loop detected in delegate phase, injecting warning")
+			l.state.History = append(l.state.History, llm.NewSystemMessage(
+				"[系统警告] 检测到重复操作：你已连续多次委托相同任务。请尝试不同的方法或直接回复玩家。",
+			))
+		}
+
 		l.state.delegationCount++
 		if l.state.delegationCount >= maxDelegationsPerRun {
 			log.Debug("Max delegations reached, forcing response",
@@ -580,7 +606,18 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 				l.state.agentContext.History = l.state.History
 			}
 
-			// 检查压缩（工具调用完成后可能追加了大量 tool 消息）
+			// 幻觉循环检测：记录工具调用并检测重复模式
+			for _, tc := range result.ToolCalls {
+				l.recordAction(tc.Name, tc.Arguments, toolResults)
+			}
+			if l.detectHallucinationLoop() {
+				log.Warn("Hallucination loop detected: same tool called 3 times with similar results, injecting warning")
+				l.state.History = append(l.state.History, llm.NewSystemMessage(
+					"[系统警告] 检测到重复操作：你已连续多次执行相同操作并得到相同结果。请尝试不同的方法或直接回复玩家。",
+				))
+			}
+
+			// 检查压缩（委托完成后可能追加了大量 tool 消息）
 			l.maybeCompressHistory()
 			return PhaseThink
 		}
@@ -737,7 +774,7 @@ func (l *ReActLoop) executeDelegationsParallel(ctx context.Context, calls []agen
 }
 
 // subAgentMaxIterations 子Agent内部循环最大迭代次数
-const subAgentMaxIterations = 10
+const subAgentMaxIterations = 5
 
 // executeSingleDelegation 执行单个委托任务
 // 内部实现迷你ReAct循环：子Agent可能多次调用工具，直到生成最终文本响应
@@ -1036,6 +1073,65 @@ func formatKnownEntityIDs(entityIDs map[string]string) string {
 	parts = append(parts, "**注意**: 在调用任何需要 actor_id 或 scene_id 的 API 时，必须使用上述 ID 值，不得使用角色名称或其他标识符。")
 
 	return joinStrings(parts, "\n")
+}
+
+// recordAction 记录一次工具调用到动作历史，用于幻觉循环检测
+func (l *ReActLoop) recordAction(toolName string, params map[string]any, results []llm.ToolResult) {
+	digest := ""
+	if len(results) > 0 {
+		r := results[0]
+		if len(r.Content) > 100 {
+			digest = r.Content[:100]
+		} else {
+			digest = r.Content
+		}
+	}
+	l.state.actionHistory = append(l.state.actionHistory, ActionRecord{
+		ToolName:     toolName,
+		Params:       params,
+		ResultDigest: digest,
+	})
+
+	// 保留最近10条记录，防止无限增长
+	if len(l.state.actionHistory) > 10 {
+		l.state.actionHistory = l.state.actionHistory[len(l.state.actionHistory)-10:]
+	}
+}
+
+// detectHallucinationLoop 检测幻觉循环：连续3次相同工具+相似参数+相似结果
+func (l *ReActLoop) detectHallucinationLoop() bool {
+	history := l.state.actionHistory
+	if len(history) < 3 {
+		return false
+	}
+
+	recent := history[len(history)-3:]
+
+	sameTool := recent[0].ToolName == recent[1].ToolName && recent[1].ToolName == recent[2].ToolName
+	if !sameTool {
+		return false
+	}
+
+	similarParams := similarMaps(recent[0].Params, recent[1].Params) && similarMaps(recent[1].Params, recent[2].Params)
+	similarResults := recent[0].ResultDigest == recent[1].ResultDigest && recent[1].ResultDigest == recent[2].ResultDigest
+
+	return similarParams && similarResults
+}
+
+// similarMaps 粗略比较两个 map 是否相似（比较大小和主要键值）
+func similarMaps(a, b map[string]any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	matches := 0
+	for k, va := range a {
+		if vb, ok := b[k]; ok {
+			if fmt.Sprintf("%v", va) == fmt.Sprintf("%v", vb) {
+				matches++
+			}
+		}
+	}
+	return matches >= len(a)-1
 }
 
 // joinStrings 连接字符串切片

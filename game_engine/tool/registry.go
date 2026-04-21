@@ -169,6 +169,17 @@ func (r *ToolRegistry) GetAgentsForTool(toolName string) []string {
 	return agents
 }
 
+// IsToolReadOnly 判断指定工具是否为只读工具
+// 实现 llm.ToolReadOnlyChecker 接口，供 ContextCompressor 使用
+// 返回 (是否只读, 是否找到该工具)
+func (r *ToolRegistry) IsToolReadOnly(toolName string) (bool, bool) {
+	t, ok := r.tools[toolName]
+	if !ok {
+		return false, false
+	}
+	return t.ReadOnly(), true
+}
+
 // ExecuteTools 执行多个Tool调用
 func (r *ToolRegistry) ExecuteTools(ctx context.Context, calls []llm.ToolCall) []llm.ToolResult {
 	log := r.getLogger()

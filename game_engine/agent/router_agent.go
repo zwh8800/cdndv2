@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"go.uber.org/zap"
 
@@ -108,7 +109,14 @@ func (r *RouterAgent) buildSystemPrompt(gameState *game_summary.GameSummary) str
 }
 
 // buildRouterTools 构建路由工具定义
+// 动态从注册的SubAgent列表生成agent_name枚举，无需手动维护
 func (r *RouterAgent) buildRouterTools() []map[string]any {
+	agentNames := make([]string, 0, len(r.agents))
+	for name := range r.agents {
+		agentNames = append(agentNames, name)
+	}
+	sort.Strings(agentNames)
+
 	return []map[string]any{
 		{
 			"type": "function",
@@ -125,7 +133,7 @@ func (r *RouterAgent) buildRouterTools() []map[string]any {
 								"properties": map[string]any{
 									"agent_name": map[string]any{
 										"type":        "string",
-										"enum":        []string{"character_agent", "combat_agent", "rules_agent"},
+										"enum":        agentNames,
 										"description": "要委托的Agent名称",
 									},
 									"intent": map[string]any{

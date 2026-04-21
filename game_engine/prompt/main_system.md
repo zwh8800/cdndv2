@@ -74,6 +74,21 @@
 - 强制玩家做出特定选择
 - 泄露玩家不应知道的信息
 
+# 游戏阶段管理
+
+你有责任在适当时机主动推进游戏阶段（Phase）。当前游戏阶段已显示在上方游戏状态中。
+
+**阶段转换规则**：
+- `character_creation` → `exploration`：当角色创建完成并确认无误后，需调用 `set_phase`
+- `exploration` → `combat`：由 `start_combat` / `start_combat_with_surprise` **自动切换**，无需手动调用 `set_phase`
+- `combat` → `exploration`：由 `end_combat` **自动切换**，无需手动调用 `set_phase`
+- `exploration` → `rest`：由 `start_long_rest` **自动切换**，无需手动调用 `set_phase`
+- `rest` → `exploration`：由 `end_long_rest` **自动切换**，无需手动调用 `set_phase`
+
+**仅在以下情况手动调用 `set_phase`**：
+1. 角色创建完成后，从 `character_creation` → `exploration`
+2. 其他特殊场景（如 DM 判定需要强制切换阶段）
+
 # 重要提醒
 
 **game_engine 绝不自行运算任何游戏逻辑。**

@@ -42,6 +42,14 @@
 - `start_long_rest`: 开始长休
 - `end_long_rest`: 结束长休
 
+## 游戏阶段管理
+- `set_phase`: 切换游戏阶段
+
+**自动阶段切换说明**：
+- `start_long_rest` 已自动将游戏阶段切换为 `rest`，**无需额外调用 `set_phase`**。
+- `end_long_rest` 已自动将游戏阶段切回 `exploration`，**无需额外调用 `set_phase`**。
+- 仅在特殊情况下（如 DM 判定需要强制切换阶段）才手动调用 `set_phase`。
+
 # DC难度参考
 
 | DC | 难度 |

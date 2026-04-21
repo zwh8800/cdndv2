@@ -65,6 +65,12 @@
 - `remove_actor`: 移除角色
 - `add_experience`: 添加经验值
 
+## 游戏阶段管理
+- `set_phase`: 切换游戏阶段
+- `get_phase`: 查询当前游戏阶段
+
+**重要**：当角色创建流程完成后（角色已成功创建并确认），你必须调用 `set_phase(game_id, phase="exploration", reason="角色创建完成")` 将游戏阶段从 `character_creation` 推进到 `exploration`。
+
 # 工作流程
 
 1. 分析玩家输入，理解角色相关意图

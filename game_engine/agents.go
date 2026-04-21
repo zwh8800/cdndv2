@@ -159,6 +159,12 @@ func registerAgentTools(registry *tool.ToolRegistry, engine *engine.Engine) {
 	// 只读 - MainAgent + SubAgent
 	registry.Register(tool.NewGetCraftingRecipesTool(engine), []string{agent.SubAgentNameCrafting, agent.MainAgentName}, "crafting")
 
+	// ========== 游戏阶段管理工具 ==========
+	// 写操作 - MainAgent + character_agent（角色创建完成后需要推进阶段）
+	registry.Register(tool.NewSetPhaseTool(engine), []string{agent.MainAgentName, agent.SubAgentNameCharacter, agent.SubAgentNameCombat, agent.SubAgentNameRules}, "phase")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewGetPhaseTool(engine), []string{agent.MainAgentName, agent.SubAgentNameCharacter, agent.SubAgentNameCombat, agent.SubAgentNameRules}, "phase")
+
 	// ========== 数据查询工具 ==========
 	// 只读 - Data Query Agent + MainAgent
 	registry.Register(tool.NewListRacesTool(engine), []string{agent.SubAgentNameDataQuery, agent.SubAgentNameCharacter, agent.MainAgentName}, "data_query")

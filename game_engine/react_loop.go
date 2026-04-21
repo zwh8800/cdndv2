@@ -219,6 +219,20 @@ func (l *ReActLoop) observe(ctx context.Context) {
 		zap.Any("gameState", summary),
 	)
 
+	// 自动推进游戏阶段：当处于 character_creation 且已存在玩家角色时，自动进入 exploration
+	if summary != nil && summary.Phase == "character_creation" && summary.Player != nil {
+		log.Info("Auto-advancing game phase from character_creation to exploration",
+			zap.String("playerName", summary.Player.Name),
+			zap.String("playerID", string(summary.Player.ID)),
+		)
+		_, err := l.engine.SetPhase(ctx, l.state.GameID, model.PhaseExploration, "角色创建完成，自动进入探索阶段")
+		if err != nil {
+			log.Warn("Failed to auto-advance phase", zap.Error(err))
+		} else {
+			summary.Phase = "exploration"
+		}
+	}
+
 	// 构建上下文
 	l.state.agentContext = agent.NewAgentContext(
 		string(l.state.GameID),

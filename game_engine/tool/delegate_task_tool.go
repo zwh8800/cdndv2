@@ -24,15 +24,8 @@ func NewDelegateTaskTool() *DelegateTaskTool {
 				"enum": []string{
 					"character_agent",
 					"combat_agent",
-					"rules_agent",
-					"inventory_agent",
 					"narrative_agent",
-					"npc_agent",
-					"memory_agent",
-					"movement_agent",
-					"mount_agent",
-					"crafting_agent",
-					"data_query_agent",
+					"inventory_agent",
 				},
 				"description": "要委托的Agent名称，根据任务类型选择对应的专业Agent",
 			},
@@ -51,7 +44,7 @@ func NewDelegateTaskTool() *DelegateTaskTool {
 	return &DelegateTaskTool{
 		BaseTool: BaseTool{
 			name:        DelegateTaskToolName,
-			description: "将任务委托给专门的Agent处理。根据任务类型选择对应Agent：character_agent(角色创建/更新/经验)、combat_agent(战斗/攻击/伤害/治疗)、rules_agent(检定/豁免/法术/休息)、inventory_agent(物品/装备/货币)、narrative_agent(场景/探索/旅行/陷阱)、npc_agent(NPC交互)、memory_agent(任务/生活方式/时间)、movement_agent(跳跃/坠落/窒息)、mount_agent(骑乘/坐骑)、crafting_agent(制作)、data_query_agent(查询种族/职业/法术等静态数据)。",
+			description: "将任务委托给专门的Agent处理。根据任务类型选择对应Agent：character_agent(角色创建/更新/经验/骑乘)、combat_agent(战斗/攻击/伤害/治疗/检定/豁免/法术/休息)、narrative_agent(场景/探索/旅行/陷阱/NPC/社交/任务/时间/环境移动)、inventory_agent(物品/装备/魔法物品/货币/制作)。",
 			schema:      schema,
 		},
 	}

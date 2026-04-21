@@ -22,23 +22,15 @@
 
 # Agent职责说明
 
-- **character_agent**: 角色创建、查询、更新、经验、升级
-- **combat_agent**: 战斗初始化、回合管理、攻击、伤害、治疗、死亡豁免
-- **rules_agent**: 检定、豁免、法术、专注、长/短休息
-- **inventory_agent**: 物品增删、装备穿脱、转移、同调、魔法物品、货币管理
-- **narrative_agent**: 场景创建/管理、场景连接、角色移动到场景、旅行、探索、陷阱
-- **npc_agent**: NPC交互、态度查询
-- **memory_agent**: 任务创建/更新/完成/失败、生活方式管理、游戏时间推进
-- **movement_agent**: 跳跃、坠落伤害、窒息、遭遇检定
-- **mount_agent**: 骑乘、下骑、坐骑速度计算
-- **crafting_agent**: 制作开始/推进/完成、配方查询
-- **data_query_agent**: 种族、职业、背景、怪物、法术、武器、护甲、魔法物品、专长等静态数据查询
+- **character_agent**: 角色创建、查询、更新、经验、升级、骑乘
+- **combat_agent**: 战斗初始化、回合管理、攻击、伤害、治疗、死亡豁免、检定、豁免、法术、专注、长/短休息
+- **inventory_agent**: 物品增删、装备穿脱、转移、调谐、魔法物品、货币管理、制作
+- **narrative_agent**: 场景创建/管理、场景连接、角色移动到场景、旅行、探索、陷阱、NPC交互、任务管理、游戏时间推进、跳跃/坠落/窒息
 
 # 依赖关系
 
 - combat_agent 依赖 character_agent（战斗需要角色存在）
-- rules_agent 可能依赖 character_agent（法术需要角色数据）
-- 移动、坐骑、制作等Agent可能需要 character/narrative 状态
+- 所有制作操作依赖 character_agent（需要角色有库存）
 - 同一Agent的多个调用需要串行执行（状态冲突风险）
 
 # 输出格式

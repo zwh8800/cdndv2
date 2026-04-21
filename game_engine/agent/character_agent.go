@@ -21,7 +21,7 @@ func NewCharacterAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *Ch
 	return &CharacterAgent{
 		BaseSubAgent: NewBaseSubAgent(SubAgentConfig{
 			Name:         SubAgentNameCharacter,
-			Description:  "角色管理Agent，负责角色创建、查询、更新、经验、休息",
+			Description:  "角色管理Agent，负责角色创建、查询、更新、经验、休息、骑乘",
 			TemplateFile: "character_system.md",
 			DomainIntro:  "你是D&D 5e角色管理专家。",
 			DomainRule:   "所有角色操作必须通过调用Tools完成，不得自行计算。",
@@ -32,7 +32,8 @@ func NewCharacterAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *Ch
 				"create_character", "create_pc", "create_npc", "create_enemy", "create_companion",
 				"get_actor", "get_pc", "list_actors", "update_actor", "remove_actor",
 				"add_experience", "level_up", "short_rest", "long_rest",
-				"character", "角色", "创建", "升级", "经验", "休息",
+				"mount", "dismount", "mount_speed",
+				"character", "角色", "创建", "升级", "经验", "休息", "骑乘", "下马", "坐骑",
 			},
 			ExtraTemplateData: func(ctx *AgentContext) map[string]any {
 				return map[string]any{

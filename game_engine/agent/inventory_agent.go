@@ -5,7 +5,7 @@ import (
 	"github.com/zwh8800/cdndv2/game_engine/tool"
 )
 
-// InventoryAgent 库存和装备管理Agent
+// InventoryAgent 库存、装备和制作管理Agent
 type InventoryAgent struct {
 	*BaseSubAgent
 }
@@ -15,9 +15,9 @@ func NewInventoryAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *In
 	return &InventoryAgent{
 		BaseSubAgent: NewBaseSubAgent(SubAgentConfig{
 			Name:         SubAgentNameInventory,
-			Description:  "库存管理Agent，负责物品管理、装备管理、魔法物品、货币管理",
+			Description:  "库存管理Agent，负责物品管理、装备管理、魔法物品、货币管理、制作系统",
 			TemplateFile: "inventory_system.md",
-			DomainIntro:  "你是D&D 5e库存和装备管理专家。",
+			DomainIntro:  "你是D&D 5e库存、装备和制作管理专家。",
 			DomainRule:   "所有库存操作必须通过调用Tools完成，不得自行计算。",
 			KeyRules: []string{
 				"每个角色最多同时调谐3个魔法物品",
@@ -31,7 +31,9 @@ func NewInventoryAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *In
 				"equip_item", "unequip_item", "get_equipment",
 				"transfer_item", "attune_item", "unattune_item",
 				"add_currency", "use_magic_item", "recharge", "magic_item",
+				"start_crafting", "advance_crafting", "complete_crafting", "get_crafting_recipes",
 				"inventory", "物品", "装备", "库存", "调谐", "货币", "金币",
+				"制作", "配方", "锻造", "炼金",
 			},
 		}, registry, llmClient),
 	}

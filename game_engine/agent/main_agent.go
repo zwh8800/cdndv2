@@ -369,8 +369,8 @@ func (m *MainAgent) inferAgentForTool(toolName string) string {
 			return a
 		}
 	}
-	// 默认委托给 rules_agent
-	return SubAgentNameRules
+	// 默认委托给 combat_agent（包含rules）
+	return SubAgentNameCombat
 }
 
 // prepareTemplateData 准备提示词模板数据

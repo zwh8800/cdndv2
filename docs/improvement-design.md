@@ -1110,6 +1110,16 @@ func NewReActLoop(...) *ReActLoop {
 | 自动上下文注入 + 名称解析机制 | 中 | 消除 name-vs-ID 错误 | ✅ 已完成 |
 | 删除 RouterAgent，保留 delegate_task | 小 | 减少 1 次 LLM 调用 | ✅ 已完成 |
 
+### Phase 2.2b (前置优化，1-2 周)
+
+> SubAgent 合并优化——为复合工具实现扫清障碍
+
+| 改进 | 工作量 | 影响 | 状态 |
+|------|--------|------|------|
+| SubAgent 从 11 个合并为 4 个 | 中 | 减少 LLM 调用次数、简化委派决策 | ✅ 已完成 |
+
+详见 [Phase 2.2b 设计方案](#phase-22b-subagent-合并优化)。
+
 ### Phase 2.3 (4-8 周)
 
 | 改进 | 工作量 | 影响 | 状态 |
@@ -1118,6 +1128,229 @@ func NewReActLoop(...) *ReActLoop {
 | 复合工具实现（角色/场景/查询） | 高 | 总工具数从 ~97 降至 ~46 | ❌ 待做 |
 | SubAgent ToolsForTask() 过滤 | 中 | SubAgent 工具数降至 5-8 | ❌ 待做 |
 | 战斗 Plan-Then-Act 模式 | 中 | 战斗 LLM 调用减少 50-80% | ❌ 待做 |
+
+---
+
+## Phase 2.2b: SubAgent 合并优化
+
+> **前置条件**: Phase 2.1 ✅ Phase 2.2 ✅
+> **目的**: 为 Phase 2.3 复合工具实现扫清障碍。当前 11 个 SubAgent 功能拆分过细，导致：① 委派决策空间过大（MainAgent 从 11 个中选 1-N 个），② 单个 Agent 工具太少（npc_agent 仅 2 个工具），③ 合并工具后仍需在多个 Agent 间协调，复合工具的价值被稀释。
+
+### 当前问题分析
+
+#### 1. 微型 Agent 没有独立存在价值
+
+| Agent | 工具数 | 写工具数 | 问题 |
+|-------|--------|---------|------|
+| `npc_agent` | 2 | 1 | 仅 1 个写工具 `interact_with_npc`，完全可以并入 `narrative_agent`（社交互动是探索的核心组成部分） |
+| `mount_agent` | 3 | 2 | 仅 2 个写工具，D&D 5e 中骑乘是低频操作，并入 `character_agent`（角色能力扩展） |
+| `movement_agent` | 5 | 4 | 跳跃/跌落/窒息/遭遇检定属于"环境交互"，与 `narrative_agent` 的场景/探索功能天然关联 |
+| `crafting_agent` | 4 | 3 | 制作依赖 inventory（`Dependencies: [character, inventory]`），且是极低频操作，并入 `inventory_agent` |
+
+这 4 个 Agent 合计仅 14 个工具，却要产生 4 次 SubAgent LLM 调用、4 份系统提示、4 套关键词匹配逻辑。
+
+#### 2. rules_agent 与 combat_agent 职责边界模糊
+
+- `rules_agent` 管理检定、豁免、施法、休息——但这些操作在战斗中频繁发生
+- `combat_agent` 管理战斗流程——但攻击涉及检定、伤害涉及豁免
+- `perform_death_save` 同时注册在 `combat_agent` 和 `rules_agent` 两个 Agent
+- 战斗中 MainAgent 经常需要在 "委派 combat_agent 还是 rules_agent" 之间犹豫
+
+**关键洞察**: D&D 5e 中，战斗就是规则的子集。"规则仲裁"和"战斗执行"在实践中不可分割。
+
+#### 3. data_query_agent 是伪 Agent
+
+- `data_query_agent` 只有只读工具，没有任何写操作
+- 其工具已经全部注册给 `MainAgent` 可直接调用
+- MainAgent 完全可以直接用只读查询工具，无需委派给一个 "只做查询" 的 Agent
+- 保留它只是增加了一次不必要的 SubAgent LLM 调用
+
+#### 4. memory_agent 功能混杂
+
+- "任务系统"（quest CRUD）和"生活方式/时间推进"（lifestyle/game_time）逻辑上不属于同一领域
+- 任务系统更接近叙事（quest 是剧情驱动的），生活方式/时间更接近游戏流程管理
+- 但任务系统工具数量也不多（7 个写工具），不值得独立存在
+
+### 合并方案: 11 → 5
+
+#### 合并后结构
+
+| 新 Agent | 包含的旧 Agent | 工具数(写/读) | 职责 |
+|----------|---------------|-------------|------|
+| **`character_agent`** | character + mount | 9W/14R (20) | 角色 CRUD、经验/升级/休息、骑乘 |
+| **`combat_agent`** | combat + rules | 22W/12R (34) | 战斗全流程 + 规则检定/施法/休息 |
+| **`narrative_agent`** | narrative + npc + movement + memory | 30W/13R (43) | 场景/探索/旅行/社交/陷阱/任务/时间/环境交互 |
+| **`inventory_agent`** | inventory + crafting | 13W/6R (19) | 物品/装备/魔法物品/货币/制作 |
+| ~~`data_query_agent`~~ | 删除，工具仅注册给 MainAgent | 0 | 只读查询无需 Agent |
+
+#### 合并理由详解
+
+##### character_agent ← mount_agent
+
+- **逻辑**: 骑乘是角色的"能力状态"（mounted/unmounted），如同装备状态，属于角色管理范畴
+- **触发场景**: "我骑上马" → character_agent 处理，无需额外委派
+- **关键词扩展**: 加入 "骑乘/下马/坐骑"
+- **工具变化**: +3 工具（mount_creature, dismount, calculate_mount_speed）
+
+##### combat_agent ← rules_agent
+
+- **逻辑**: D&D 5e 战斗中，检定/豁免/施法/专注是战斗动作的有机组成部分。将它们拆到两个 Agent 导致：
+  - 战斗中频繁跨 Agent 委派（attack → rules_agent 做检定 → combat_agent 做伤害）
+  - `perform_death_save` 的双注册问题
+  - MainAgent 在 "我攻击哥布林" 时不知该委派给谁
+- **合并后**: 战斗+规则统一入口，一次委派完成完整战斗动作
+- **关键词扩展**: 加入 "检定/豁免/法术/专注/技能/休息"
+- **工具变化**: +12 写工具（检定×3, 施法×4, 专注×2, 休息×3）+7 读工具
+- **注意**: 非战斗场景下的检定（如探索中推门的力量检定）也由此 Agent 处理，因为"规则执行"本身不需要区分场景
+
+##### narrative_agent ← npc_agent + movement_agent + memory_agent
+
+- **逻辑**: 叙事 = 场景 + 探索 + 社交 + 环境交互 + 剧情（任务）+ 时间推进。这些都是"非战斗的游戏世界交互"，天然聚合
+- ** npc_agent 合并**: 社交互动发生在场景中，NPC 是场景的一部分。"和铁匠谈话" = 场景中的社交动作
+- **movement_agent 合并**: 跳跃/跌落/窒息/遭遇是"环境交互"，属于探索叙事
+- **memory_agent 合并**: 任务（quest）是剧情驱动，属于叙事；生活方式和时间推进是游戏世界管理
+- **关键词扩展**: 加入 "NPC/社交/态度/跳跃/跌落/窒息/遭遇/任务/时间/生活方式"
+- **工具变化**: +12 写工具 +5 读工具
+
+##### inventory_agent ← crafting_agent
+
+- **逻辑**: 制作 = 消耗材料 + 产出物品，是库存管理的延伸。crafting_agent 的 `Dependencies` 已经包含 inventory
+- **合并后**: 物品生命周期完整闭环——获取/制作 → 装备/使用 → 消耗/转出
+- **关键词扩展**: 加入 "制作/配方/锻造/炼金"
+- **工具变化**: +3 写工具 +1 读工具
+
+##### data_query_agent → 删除
+
+- **逻辑**: 所有 data_query 工具都是只读的，已注册给 MainAgent 直接使用。委派给 SubAgent 只增加一次 LLM 调用
+- **迁移**: 将 `list_races/get_race/list_classes/get_class/list_backgrounds/get_background` 保留给 `character_agent`（角色创建时需要），其余仅注册给 MainAgent
+- **关键词**: data_query 的关键词（"种族/职业/怪物/法术"等）分散到对应的新 Agent 中
+
+### 合并后的委派决策简化
+
+#### 合并前（11 选 N）
+
+MainAgent 看到用户说 "我想攻击哥布林"：
+- `delegate_task(agent_name="combat_agent")` — 对的
+- 但攻击涉及检定，需要 `rules_agent`？还是 `combat_agent` 自己处理？
+- 如果哥布林不存在，需要先 `character_agent` 创建？
+- 决策空间大，容易选错
+
+#### 合并后（4 选 1）
+
+MainAgent 看到用户说 "我想攻击哥布林"：
+- `delegate_task(agent_name="combat_agent")` — 包含战斗+检定+施法，一个 Agent 搞定
+- 简单场景一目了然
+
+**委派决策映射表**:
+
+| 用户意图 | 委派目标 |
+|---------|---------|
+| 创建/修改角色、骑乘 | `character_agent` |
+| 战斗、检定、施法、休息 | `combat_agent` |
+| 场景、探索、NPC、任务、时间、陷阱 | `narrative_agent` |
+| 物品、装备、制作 | `inventory_agent` |
+
+### 实现计划
+
+#### Step 1: 常量更新
+
+`game_engine/agent/const.go`:
+```go
+const (
+    MainAgentName         = "main_agent"
+    SubAgentNameCharacter = "character_agent"   // character + mount
+    SubAgentNameCombat    = "combat_agent"       // combat + rules
+    SubAgentNameNarrative = "narrative_agent"    // narrative + npc + movement + memory
+    SubAgentNameInventory = "inventory_agent"    // inventory + crafting
+    // 删除: SubAgentNameNPC, SubAgentNameMemory, SubAgentNameMovement, SubAgentNameMount, SubAgentNameCrafting, SubAgentNameDataQuery
+)
+```
+
+#### Step 2: Agent 文件更新
+
+| 文件 | 操作 |
+|------|------|
+| `character_agent.go` | 扩展 Keywords，加入骑乘关键词 |
+| `combat_agent.go` | 扩展 Keywords，加入检定/施法/休息关键词 |
+| `narrative_agent.go` | 扩展 Keywords，加入 NPC/移动/任务/时间关键词 |
+| `inventory_agent.go` | 扩展 Keywords，加入制作关键词 |
+| `npc_agent.go` | 删除 |
+| `memory_agent.go` | 删除 |
+| `movement_agent.go` | 删除 |
+| `mount_agent.go` | 删除 |
+| `crafting_agent.go` | 删除 |
+| `data_query_agent.go` | 删除 |
+
+#### Step 3: 工具注册更新
+
+`game_engine/agents.go` — `registerAgentTools()`:
+- 原 `npc_agent` 工具 → 注册给 `narrative_agent`
+- 原 `mount_agent` 工具 → 注册给 `character_agent`
+- 原 `movement_agent` 工具 → 注册给 `narrative_agent`
+- 原 `memory_agent` 工具 → 注册给 `narrative_agent`
+- 原 `crafting_agent` 工具 → 注册给 `inventory_agent`
+- 原 `rules_agent` 工具 → 注册给 `combat_agent`
+- 原 `data_query_agent` 工具 → 仅保留 character_agent 和 main_agent 的注册，删除 data_query_agent
+
+`game_engine/agents.go` — `createSubAgents()`:
+- 从 11 个减到 4 个
+
+#### Step 4: Prompt 模板更新
+
+| 模板文件 | 操作 |
+|---------|------|
+| `character_system.md` | 加入骑乘相关规则说明 |
+| `combat_system.md` | 大幅扩展，加入检定/豁免/施法/休息/专注规则 |
+| `narrative_system.md` | 大幅扩展，加入NPC社交/环境交互/任务/时间/生活方式规则 |
+| `inventory_system.md` | 扩展，加入制作系统规则 |
+| `npc_system.md` | 删除（内容合并入 narrative_system.md） |
+| `memory_system.md` | 删除（内容合并入 narrative_system.md） |
+| `movement_system.md` | 删除（内容合并入 narrative_system.md） |
+| `mount_system.md` | 删除（内容合并入 character_system.md） |
+| `crafting_system.md` | 删除（内容合并入 inventory_system.md） |
+| `rules_system.md` | 删除（内容合并入 combat_system.md） |
+| `data_query_system.md` | 删除 |
+
+#### Step 5: delegate_task 枚举更新
+
+`game_engine/tool/delegate_task_tool.go`:
+- `agent_name` enum 从 11 个减到 4 个
+
+#### Step 6: Phase 工具过滤更新
+
+`game_engine/tool/registry.go` — `GetReadOnlySchemasByPhase()`:
+- 更新 phase-tool 映射，反映新 Agent 结构
+
+### 合并前后的关键指标对比
+
+| 指标 | 合并前 | 合并后 | 改善 |
+|------|--------|--------|------|
+| SubAgent 数量 | 11 | 4 | -64% |
+| delegate_task 枚举 | 11 选项 | 4 选项 | -64% |
+| 委派决策复杂度 | 高（11 选 N） | 低（4 选 1） | 大幅降低 |
+| 最小微型 Agent 工具数 | 2 (npc) | 19 (inventory) | 消除微型 Agent |
+| SubAgent LLM 调用（跨领域场景） | 2-3 次 | 1 次 | -50%~-67% |
+| Agent 文件数 | 16 | 8 | -50% |
+| Prompt 模板数 | 12 | 7 | -42% |
+| 可维护性 | 分散 | 集中 | 提升 |
+
+### 风险与缓解
+
+| 风险 | 缓解措施 |
+|------|---------|
+| combat_agent 工具数过多（34） | Phase 2.3 的复合工具合并将大幅减少；Phase 过滤已实现按场景裁剪；后续 `ToolsForTask()` 进一步过滤 |
+| narrative_agent 工具数最多（43） | 同上；叙事 Agent 工具虽多但按任务类型自然分组，`ToolsForTask()` 按关键词过滤到 5-8 个 |
+| 单个 Agent prompt 模板过长 | 模板中按功能分区（## 场景管理 / ## 社交互动 / ## 环境交互...），LLM 可快速定位相关规则 |
+| 合并后 Agent 职责描述不够精确 | 在 delegate_task 的 agent description 中加入详细的 "handles / does NOT handle" 清单 |
+
+### Phase 2.2b 与 Phase 2.3 的关系
+
+Phase 2.2b 是 Phase 2.3 的**前置条件**：
+
+1. **复合工具归属清晰**: 合并后每个复合工具只属于 1 个 Agent，不存在 "combat_attack 该注册给 combat 还是 rules" 的问题
+2. **ToolsForTask() 实现简化**: 4 个 Agent 的任务过滤逻辑比 11 个简单得多
+3. **Plan-Then-Act 范围明确**: 战斗计划只涉及 `combat_agent`，无需考虑跨 Agent 编排
+4. **测试覆盖集中**: 复合工具测试按 4 个 Agent 分组，而非 11 个
 
 ### Phase 3.x (与现有规划并行)
 
@@ -1152,6 +1385,7 @@ func NewReActLoop(...) *ReActLoop {
 | 游戏状态摘要增强（属性值/种族/背景/等级/熟练加值/灵感/状态效果） | `game_summary/summary.go`, `formatter.go` |
 | 名称解析机制（actor_id/scene_id 名称→ID 自动转换） | `react_loop.go` |
 | RouterAgent 默认禁用（节省 1 次 LLM 调用） | `engine.go` |
+| SubAgent 合并优化（11 → 4，删除 7 个微型 Agent） | `agent/const.go`, `agents.go`, `prompt/*.md` |
 
 ---
 

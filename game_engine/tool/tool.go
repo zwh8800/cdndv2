@@ -230,3 +230,96 @@ func RequireMap(params map[string]any, key string) (map[string]any, error) {
 	}
 	return m, nil
 }
+
+// CompositeTool 复合工具 - 将多个底层工具合并为一个语义完整的高层工具
+type CompositeTool struct {
+	BaseTool
+	registry *ToolRegistry
+	steps    []ToolStep
+}
+
+// ToolStep 复合工具中的一个执行步骤
+type ToolStep struct {
+	ToolName string
+	Params   func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any
+	OnResult func(result *ToolResult, ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) error
+}
+
+// ToolStepResult 步骤执行结果
+type ToolStepResult struct {
+	Result *ToolResult
+	Error  error
+}
+
+// NewCompositeTool 创建新的复合工具
+func NewCompositeTool(name, description string, schema map[string]any, registry *ToolRegistry, steps []ToolStep, readOnly bool) *CompositeTool {
+	return &CompositeTool{
+		BaseTool: BaseTool{
+			name:        name,
+			description: description,
+			schema:      schema,
+			readOnly:    readOnly,
+		},
+		registry: registry,
+		steps:    steps,
+	}
+}
+
+// Execute 执行复合工具，按顺序执行所有步骤
+func (t *CompositeTool) Execute(ctx context.Context, params map[string]any) (*ToolResult, error) {
+	prevResults := make(map[string]*ToolResult)
+
+	for _, step := range t.steps {
+		// 获取工具实例
+		tool, ok := t.registry.Get(step.ToolName)
+		if !ok {
+			return &ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("composite step tool '%s' not found in registry", step.ToolName),
+			}, nil
+		}
+
+		// 生成动态参数
+		stepParams := step.Params(ctx, params, prevResults)
+
+		// 执行工具
+		result, err := tool.Execute(ctx, stepParams)
+		if err != nil {
+			return &ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("composite step '%s' failed: %v", step.ToolName, err),
+			}, nil
+		}
+
+		// 如果步骤执行失败，直接返回
+		if !result.Success {
+			return &ToolResult{
+				Success: false,
+				Data:     result.Data,
+				Message:  result.Message,
+				Error:    result.Error,
+				Metadata: result.Metadata,
+			}, nil
+		}
+
+		// 存储结果供后续步骤使用
+		prevResults[step.ToolName] = result
+
+		// 调用结果处理回调
+		if step.OnResult != nil {
+			if err := step.OnResult(result, ctx, params, prevResults); err != nil {
+				return &ToolResult{
+					Success: false,
+					Error:   fmt.Sprintf("composite step '%s' onResult failed: %v", step.ToolName, err),
+				}, nil
+			}
+		}
+	}
+
+	// 所有步骤执行成功，返回最终结果
+	// 默认返回最后一步的结果
+	lastStep := t.steps[len(t.steps)-1]
+	lastResult := prevResults[lastStep.ToolName]
+
+	return lastResult, nil
+}

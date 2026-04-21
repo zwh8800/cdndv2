@@ -40,6 +40,10 @@ type SubAgent interface {
 
 	// Dependencies 返回依赖的其他Agent
 	Dependencies() []string
+
+	// ToolsForTask 根据具体任务返回应暴露的工具子集
+	// 如果返回 nil 或空切片，回退到全部工具
+	ToolsForTask(task string) []tool.Tool
 }
 
 // AgentContext Agent执行上下文

@@ -881,3 +881,227 @@ func (t *AddExperienceTool) Execute(ctx context.Context, params map[string]any) 
 		Message: msg,
 	}, nil
 }
+
+// ========== 复合工具 - 角色创建 ==========
+
+// NewQueryRacesTool 复合查询种族工具：返回种族列表含简要描述
+//
+// 合并: list_races + get_race
+func NewQueryRacesTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name_filter": map[string]any{
+				"type":        "string",
+				"description": "按名称过滤（可选，留空返回所有）",
+			},
+		},
+	}
+
+	desc := `Query available playable races with brief descriptions.
+
+Use when: Player is creating a character and wants to see available race options. One call returns all races with their key traits.
+
+Do NOT use when: Player already knows which race they want and just needs detailed data for character creation.
+
+Parameters:
+  - name_filter: Optional filter by name (contains)
+
+Returns: List of races with name, description, and key traits.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "list_races",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return map[string]any{}
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"query_races",
+		desc,
+		schema,
+		registry,
+		steps,
+		true, // read only
+	)
+}
+
+// NewQueryClassesTool 复合查询职业工具：返回职业列表含简要描述
+//
+// 合并: list_classes + get_class
+func NewQueryClassesTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name_filter": map[string]any{
+				"type":        "string",
+				"description": "按名称过滤（可选，留空返回所有）",
+			},
+		},
+	}
+
+	desc := `Query available character classes with brief descriptions.
+
+Use when: Player is creating a character and wants to see available class options. One call returns all classes with their primary abilities and hit dice.
+
+Do NOT use when: Player already knows which class they want.
+
+Parameters:
+  - name_filter: Optional filter by name (contains)
+
+Returns: List of classes with name, description, and key features.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "list_classes",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return map[string]any{}
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"query_classes",
+		desc,
+		schema,
+		registry,
+		steps,
+		true,
+	)
+}
+
+// NewQueryBackgroundsTool 复合查询背景工具：返回背景列表含简要描述
+//
+// 合并: list_backgrounds + get_background
+func NewQueryBackgroundsTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name_filter": map[string]any{
+				"type":        "string",
+				"description": "按名称过滤（可选，留空返回所有）",
+			},
+		},
+	}
+
+	desc := `Query available character backgrounds with brief descriptions.
+
+Use when: Player is creating a character and wants to see available background options. One call returns all backgrounds with their feature descriptions.
+
+Do NOT use when: Player already knows which background they want.
+
+Parameters:
+  - name_filter: Optional filter by name (contains)
+
+Returns: List of backgrounds with name, description, and feature.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "list_backgrounds",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return map[string]any{}
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"query_backgrounds",
+		desc,
+		schema,
+		registry,
+		steps,
+		true,
+	)
+}
+
+// NewCreateCharacterTool 增强版创建角色复合工具：一步创建角色并自动分配初始装备
+//
+// 增强: create_pc + 自动初始装备
+func NewCreateCharacterTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"game_id": map[string]any{
+				"type":        "string",
+				"description": "游戏会话ID",
+			},
+			"name": map[string]any{
+				"type":        "string",
+				"description": "角色名称",
+			},
+			"race": map[string]any{
+				"type":        "string",
+				"description": "种族名称",
+			},
+			"class": map[string]any{
+				"type":        "string",
+				"description": "职业名称",
+			},
+			"level": map[string]any{
+				"type":        "integer",
+				"minimum":     1,
+				"description": "角色等级，默认 1",
+			},
+			"background": map[string]any{
+				"type":        "string",
+				"description": "背景名称",
+			},
+			"alignment": map[string]any{
+				"type":        "string",
+				"description": "阵营",
+			},
+			"ability_scores": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"strength":     map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
+					"dexterity":    map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
+					"constitution": map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
+					"intelligence": map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
+					"wisdom":       map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
+					"charisma":     map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
+				},
+				"required":    []string{"strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"},
+				"description": "六项属性值",
+			},
+		},
+		"required": []string{"game_id", "name", "race", "class", "ability_scores"},
+	}
+
+	desc := `Create a new player character in one step. Automatically handles creation and returns complete character info.
+
+Use when: Player wants to create a new character. One call completes the entire process.
+
+Do NOT use when: Just browsing available options (use query_races/query_classes first).
+
+Parameters:
+  - game_id: Game session ID
+  - name: Character name
+  - race: Race name
+  - class: Class name
+  - level: Starting level (default 1)
+  - background: Background name
+  - alignment: Alignment
+  - ability_scores: Six ability scores (str/dex/con/int/wis/cha)
+
+Returns: Complete character info with ID, HP, AC, speed.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "create_pc",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"create_character",
+		desc,
+		schema,
+		registry,
+		steps,
+		false,
+	)
+}

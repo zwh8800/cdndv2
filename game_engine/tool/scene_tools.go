@@ -1048,3 +1048,219 @@ func (t *GetSceneItemsTool) Execute(ctx context.Context, params map[string]any) 
 		Message: fmt.Sprintf("场景中有 %d 件物品", len(result.Items)),
 	}, nil
 }
+
+// ========== 复合工具 - 场景系统 ==========
+
+// NewCreateConnectedSceneTool 复合创建连接场景工具：创建场景 + 自动添加与当前场景的连接
+//
+// 合并: create_scene + add_scene_connection
+func NewCreateConnectedSceneTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"game_id": map[string]any{
+				"type":        "string",
+				"description": "游戏会话ID",
+			},
+			"current_scene_id": map[string]any{
+				"type":        "string",
+				"description": "当前场景ID（新场景将与这个场景建立连接）",
+			},
+			"name": map[string]any{
+				"type":        "string",
+				"description": "新场景名称",
+			},
+			"description": map[string]any{
+				"type":        "string",
+				"description": "新场景描述",
+			},
+			"scene_type": map[string]any{
+				"type":        "string",
+				"description": "场景类型 (indoor, outdoor, wilderness, dungeon, city, tavern, shop, temple, other)",
+			},
+			"connection_description": map[string]any{
+				"type":        "string",
+				"description": "连接描述（如：一条通往东边的门）",
+			},
+		},
+		"required": []string{"game_id", "current_scene_id", "name", "description", "scene_type", "connection_description"},
+	}
+
+	desc := `Create a new scene and automatically create a connection from the current scene.
+
+Use when: Discovering a new area that needs to be added connected to where the party currently is. One call creates the scene and connects it.
+
+Do NOT use when: Just moving between existing connected scenes (no creation needed).
+
+Parameters:
+  - game_id: Game session ID
+  - current_scene_id: ID of the current scene (the one the party is in)
+  - name: Name of the new scene
+  - description: Description of the new scene
+  - scene_type: Type of scene
+  - connection_description: Description of the connection from current to new
+
+Returns: New scene created with connection established.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "create_scene",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return map[string]any{
+					"game_id":         params["game_id"],
+					"name":           params["name"],
+					"description":    params["description"],
+					"scene_type":     params["scene_type"],
+				}
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"create_connected_scene",
+		desc,
+		schema,
+		registry,
+		steps,
+		false,
+	)
+}
+
+// NewShowSceneDetailTool 复合显示场景详情：获取场景信息 + 获取角色 + 获取物品
+//
+// 合并: get_scene + get_scene_actors + get_scene_items
+func NewShowSceneDetailTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"game_id": map[string]any{
+				"type":        "string",
+				"description": "游戏会话ID",
+			},
+			"scene_id": map[string]any{
+				"type":        "string",
+				"description": "场景ID",
+			},
+		},
+		"required": []string{"game_id", "scene_id"},
+	}
+
+	desc := `Show complete scene detail including scene info, all actors, and all items in the scene.
+
+Use when: Players ask for a detailed description of a scene, or you need complete information about what's present. One call gets everything.
+
+Do NOT use when: You only need basic scene info (use get_scene), or just need actors (use get_scene_actors).
+
+Parameters:
+  - game_id: Game session ID
+  - scene_id: Scene ID to query
+
+Returns: Complete scene information with name, description, type, actors list, and items list.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "get_scene",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+		{
+			ToolName: "get_scene_actors",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+		{
+			ToolName: "get_scene_items",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"show_scene_detail",
+		desc,
+		schema,
+		registry,
+		steps,
+		true,
+	)
+}
+
+// NewMoveToSceneTool 复合移动到场景：移动角色 + 获取新场景详情
+//
+// 合并: move_actor_to_scene + set_current_scene + show_scene_detail
+func NewMoveToSceneTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"game_id": map[string]any{
+				"type":        "string",
+				"description": "游戏会话ID",
+			},
+			"actor_id": map[string]any{
+				"type":        "string",
+				"description": "要移动的角色ID（通常是玩家）",
+			},
+			"target_scene_id": map[string]any{
+				"type":        "string",
+				"description": "目标场景ID",
+			},
+		},
+		"required": []string{"game_id", "actor_id", "target_scene_id"},
+	}
+
+	desc := `Move an actor to a target scene and return complete information about the new scene.
+
+Use when: Player moves from one scene to another through a connection. One call completes the move and shows the new scene.
+
+Do NOT use when: Just moving position within the same scene.
+
+Parameters:
+  - game_id: Game session ID
+  - actor_id: Actor to move (usually the player character)
+  - target_scene_id: Target scene ID to move into
+
+Returns: Move complete with full scene detail of the destination.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "move_actor_to_scene",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return map[string]any{
+					"game_id":   params["game_id"],
+					"actor_id":  params["actor_id"],
+					"scene_id":  params["target_scene_id"],
+				}
+			},
+		},
+		{
+			ToolName: "set_current_scene",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return map[string]any{
+					"game_id":  params["game_id"],
+					"scene_id": params["target_scene_id"],
+				}
+			},
+		},
+		{
+			ToolName: "show_scene_detail",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return map[string]any{
+					"game_id":   params["game_id"],
+					"scene_id":  params["target_scene_id"],
+				}
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"move_to_scene",
+		desc,
+		schema,
+		registry,
+		steps,
+		false,
+	)
+}

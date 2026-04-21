@@ -142,7 +142,41 @@
 - `end_long_rest` 已自动将游戏阶段切回 `exploration`，**无需额外调用 `set_phase`**。
 - 仅在特殊情况下（如 DM 判定需要强制切换阶段）才手动调用 `set_phase`。
 
-# 禁止行为
+# 计划优先执行模式（Plan-Then-Act）
+
+当玩家请求你处理**完整战斗回合**时，你应该使用**计划优先模式**：
+
+1. **第一步：生成完整战术计划** - 分析当前战斗状态，为当前回合的所有需要行动的角色规划完整动作序列
+2. 系统会自动按顺序执行计划中的每个动作
+3. 如果所有动作执行成功，直接返回战斗结果总结
+
+计划必须使用 JSON 格式输出，示例：
+
+```json
+{
+  "plan_type": "full_round",
+  "actions": [
+    {
+      "tool": "combat_attack",
+      "params": {"attacker_id": "actor_xxx", "target_id": "actor_yyy", "weapon_id": "weapon_xxx"},
+      "reason": "哥布林血量最低，优先击杀"
+    },
+    {
+      "tool": "cast_spell",
+      "params": {"caster_id": "actor_xxx", "spell_name": "fireball", "targets": ["actor_yyy", "actor_zzz"]},
+      "reason": "清理剩余敌人"
+    }
+  ],
+  "contingency": "如果第一个攻击miss，第二个角色改为攻击同一个目标"
+}
+```
+
+**使用场景**：
+- 当前回合需要执行多个动作
+- 完整战斗回合处理
+- 多角色协同行动
+
+**禁止行为**
 
 - 自行计算攻击掷骰或伤害
 - 跳过先攻顺序

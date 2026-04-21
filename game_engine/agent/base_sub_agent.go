@@ -123,7 +123,7 @@ func (a *BaseSubAgent) Execute(ctx context.Context, req *AgentRequest) (*AgentRe
 		zap.Int("messageCount", len(messages)),
 	)
 
-	tools := a.toolsToLLMFormat()
+	tools := a.toolsToLLMFormat(req.Intent)
 	log.Debug(fmt.Sprintf("[%s] Tools retrieved", agentName),
 		zap.Int("toolCount", len(tools)),
 	)
@@ -210,6 +210,11 @@ func (a *BaseSubAgent) Priority() int {
 // Dependencies 返回依赖的其他Agent
 func (a *BaseSubAgent) Dependencies() []string {
 	return a.config.Dependencies
+}
+
+// ToolsForTask 默认实现：返回全部工具（具体Agent可覆盖）
+func (a *BaseSubAgent) ToolsForTask(task string) []tool.Tool {
+	return a.Tools()
 }
 
 // buildMessages 构建消息列表
@@ -366,8 +371,12 @@ func (a *BaseSubAgent) defaultSystemPrompt(ctx *AgentContext) string {
 }
 
 // toolsToLLMFormat 将Tools转换为LLM function calling格式
-func (a *BaseSubAgent) toolsToLLMFormat() []map[string]any {
-	tools := a.Tools()
+// 使用 ToolsForTask 根据任务描述动态过滤工具
+func (a *BaseSubAgent) toolsToLLMFormat(task string) []map[string]any {
+	tools := a.ToolsForTask(task)
+	if len(tools) == 0 {
+		tools = a.Tools()
+	}
 	result := make([]map[string]any, 0, len(tools))
 	for _, t := range tools {
 		result = append(result, map[string]any{

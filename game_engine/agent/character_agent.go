@@ -86,3 +86,84 @@ func formatBackgroundList() string {
 	}
 	return strings.Join(parts, "\n")
 }
+
+// ToolsForTask 根据任务描述动态过滤工具
+func (a *CharacterAgent) ToolsForTask(task string) []tool.Tool {
+	taskLower := strings.ToLower(task)
+	allTools := a.Tools()
+	result := make([]tool.Tool, 0)
+
+	// 复合工具总是优先保留
+	for _, t := range allTools {
+		switch t.Name() {
+		case "create_character", "query_races", "query_classes", "query_backgrounds":
+			result = append(result, t)
+		}
+	}
+
+	// 角色创建相关
+	if strings.Contains(taskLower, "create") || strings.Contains(taskLower, "new") || strings.Contains(taskLower, "创建") {
+		for _, t := range allTools {
+			switch t.Name() {
+			case "create_pc", "create_npc", "create_enemy", "create_companion":
+				result = append(result, t)
+			}
+		}
+		return result
+	}
+
+	// 查询相关
+	if strings.Contains(taskLower, "query") || strings.Contains(taskLower, "list") || strings.Contains(taskLower, "get") ||
+		strings.Contains(taskLower, "查询") || strings.Contains(taskLower, "列表") || strings.Contains(taskLower, "查看") {
+		for _, t := range allTools {
+			switch t.Name() {
+			case "get_actor", "get_pc", "list_actors", "list_races", "list_classes", "list_backgrounds",
+				"get_race", "get_class", "get_background":
+				result = append(result, t)
+			}
+		}
+		return result
+	}
+
+	// 经验升级相关
+	if strings.Contains(taskLower, "experience") || strings.Contains(taskLower, "level") || strings.Contains(taskLower, "升级") ||
+		strings.Contains(taskLower, "经验") {
+		for _, t := range allTools {
+			switch t.Name() {
+			case "add_experience", "update_actor", "get_actor":
+				result = append(result, t)
+			}
+		}
+		return result
+	}
+
+	// 修改更新相关
+	if strings.Contains(taskLower, "update") || strings.Contains(taskLower, "change") || strings.Contains(taskLower, "remove") ||
+		strings.Contains(taskLower, "修改") || strings.Contains(taskLower, "更新") || strings.Contains(taskLower, "删除") {
+		for _, t := range allTools {
+			switch t.Name() {
+			case "update_actor", "remove_actor":
+				result = append(result, t)
+			}
+		}
+		return result
+	}
+
+	// 骑乘相关
+	if strings.Contains(taskLower, "mount") || strings.Contains(taskLower, "dismount") || strings.Contains(taskLower, "骑乘") ||
+		strings.Contains(taskLower, "坐骑") {
+		for _, t := range allTools {
+			switch t.Name() {
+			case "mount_creature", "dismount", "calculate_mount_speed":
+				result = append(result, t)
+			}
+		}
+		return result
+	}
+
+	// 默认返回所有工具
+	if len(result) == 0 {
+		return allTools
+	}
+	return result
+}

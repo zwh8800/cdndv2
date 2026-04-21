@@ -664,3 +664,241 @@ func (t *GetFeatDataTool) Execute(ctx context.Context, params map[string]any) (*
 
 	return &ToolResult{Success: true, Data: result, Message: result.Feat.Name}, nil
 }
+
+// ========== 复合工具 - 数据查询 ==========
+
+// NewQuerySpellsTool 复合查询法术工具：列出法术 + 获取详情（支持过滤）
+//
+// 合并: list_spells + get_spell （多个）
+func NewQuerySpellsTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"level": map[string]any{
+				"type":        "integer",
+				"minimum":     0,
+				"maximum":     9,
+				"description": "按法术等级过滤（可选，0 为戏法）",
+			},
+			"class": map[string]any{
+				"type":        "string",
+				"description": "按职业过滤（可选，如 \"法师\"）",
+			},
+			"school": map[string]any{
+				"type":        "string",
+				"description": "按学派过滤（可选，如 \"塑能\"）",
+			},
+			"page": map[string]any{
+				"type":        "integer",
+				"description": "页码，默认 1",
+			},
+			"page_size": map[string]any{
+				"type":        "integer",
+				"description": "每页数量，默认 20",
+			},
+		},
+	}
+
+	desc := `Query spells with filtering by level, class, or school. Returns spells with brief descriptions.
+
+Use when: Player wants to browse available spells, filter by criteria, or see what a spell does. One call gets complete information.
+
+Do NOT use when: Player already knows which spell they want and just needs the ID for casting.
+
+Parameters:
+  - level: Optional filter by spell level (0 = cantrip)
+  - class: Optional filter by class
+  - school: Optional filter by magic school
+  - page: Page number for pagination (default 1)
+  - page_size: Results per page (default 20)
+
+Returns: List of spells matching criteria with complete information.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "list_spells",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"query_spells",
+		desc,
+		schema,
+		registry,
+		steps,
+		true,
+	)
+}
+
+// NewQueryEquipmentTool 复合查询装备工具：统一查询武器、护甲、魔法物品
+//
+// 合并: list_weapons / list_armors / list_magic_items 根据类型过滤
+func NewQueryEquipmentTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"equipment_type": map[string]any{
+				"type":        "string",
+				"enum":        []string{"weapon", "armor", "magic_item"},
+				"description": "装备类型：weapon(武器), armor(护甲), magic_item(魔法物品)",
+			},
+			"page": map[string]any{
+				"type":        "integer",
+				"description": "页码，默认 1",
+			},
+			"page_size": map[string]any{
+				"type":        "integer",
+				"description": "每页数量，默认 20",
+			},
+		},
+		"required": []string{"equipment_type"},
+	}
+
+	desc := `Query equipment by type (weapons, armors, or magic items).
+
+Use when: Player wants to browse available equipment options. One call gets the list.
+
+Parameters:
+  - equipment_type: Type of equipment to query (weapon, armor, magic_item)
+  - page: Page number for pagination (default 1)
+  - page_size: Results per page (default 20)
+
+Returns: List of equipment with basic stats.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "list_weapons",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				et := params["equipment_type"].(string)
+				if et == "weapon" {
+					return map[string]any{
+						"page":      params["page"],
+						"page_size": params["page_size"],
+					}
+				}
+				return map[string]any{}
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"query_equipment",
+		desc,
+		schema,
+		registry,
+		steps,
+		true,
+	)
+}
+
+// NewQueryMonstersTool 复合查询怪物工具：列出怪物 + 获取详情（支持挑战等级过滤）
+//
+// 合并: list_monsters + get_monster
+func NewQueryMonstersTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"challenge_rating": map[string]any{
+				"type":        "string",
+				"description": "按挑战等级过滤（可选，如 \"1\", \"1/4\"）",
+			},
+			"name_filter": map[string]any{
+				"type":        "string",
+				"description": "按名称过滤（可选）",
+			},
+			"page": map[string]any{
+				"type":        "integer",
+				"description": "页码，默认 1",
+			},
+			"page_size": map[string]any{
+				"type":        "integer",
+				"description": "每页数量，默认 20",
+			},
+		},
+	}
+
+	desc := `Query monsters with filtering by challenge rating or name.
+
+Use when: Player or DM wants to look up monster statistics. One call gets the information.
+
+Parameters:
+  - challenge_rating: Optional filter by challenge rating
+  - name_filter: Optional filter by monster name
+  - page: Page number for pagination (default 1)
+  - page_size: Results per page (default 20)
+
+Returns: List of monsters matching criteria with complete stat blocks.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "list_monsters",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"query_monsters",
+		desc,
+		schema,
+		registry,
+		steps,
+		true,
+	)
+}
+
+// NewQueryFeatsTool 复合查询专长工具：列出专长 + 获取详情
+//
+// 合并: list_feats_data + get_feat_data
+func NewQueryFeatsTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"name_filter": map[string]any{
+				"type":        "string",
+				"description": "按名称过滤（可选）",
+			},
+			"page": map[string]any{
+				"type":        "integer",
+				"description": "页码，默认 1",
+			},
+			"page_size": map[string]any{
+				"type":        "integer",
+				"description": "每页数量，默认 20",
+			},
+		},
+	}
+
+	desc := `Query available feats with descriptions and benefits.
+
+Use when: Player wants to browse available feats for character creation or leveling up.
+
+Parameters:
+  - name_filter: Optional filter by feat name
+  - page: Page number for pagination (default 1)
+  - page_size: Results per page (default 20)
+
+Returns: List of feats with their prerequisites and benefits.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "list_feats_data",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"query_feats",
+		desc,
+		schema,
+		registry,
+		steps,
+		true,
+	)
+}

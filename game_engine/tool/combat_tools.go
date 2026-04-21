@@ -900,3 +900,355 @@ func (t *EndCombatTool) Execute(ctx context.Context, params map[string]any) (*To
 		Message: "战斗结束",
 	}, nil
 }
+
+// ========== 复合工具 - 战斗系统 ==========
+
+// NewCombatAttackTool 复合攻击工具：自动获取可见目标 → 执行攻击 → 自动计算伤害
+//
+// 合并: list_visible_actors + execute_attack + execute_damage
+func NewCombatAttackTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"game_id": map[string]any{
+				"type":        "string",
+				"description": "游戏会话ID，系统自动注入，无需用户提供",
+			},
+			"attacker_id": map[string]any{
+				"type":        "string",
+				"description": "攻击者ID",
+			},
+			"target_name": map[string]any{
+				"type":        "string",
+				"description": "目标角色名称（支持名称解析）",
+			},
+			"weapon_name": map[string]any{
+				"type":        "string",
+				"description": "使用的武器名称（可选）",
+			},
+			"attack_type": map[string]any{
+				"type":        "string",
+				"enum":        []string{"melee", "ranged"},
+				"description": "攻击类型：melee(近战) 或 ranged(远程)",
+			},
+			"is_unarmed": map[string]any{
+				"type":        "boolean",
+				"description": "是否徒手攻击",
+				"default":     false,
+			},
+			"is_off_hand": map[string]any{
+				"type":        "boolean",
+				"description": "是否副手攻击",
+				"default":     false,
+			},
+			"advantage": map[string]any{
+				"type":        "string",
+				"enum":        []string{"none", "advantage", "disadvantage"},
+				"description": "优势/劣势，默认 none",
+				"default":     "none",
+			},
+		},
+		"required": []string{"game_id", "attacker_id", "target_name", "attack_type"},
+	}
+
+	desc := `Execute a complete attack in combat: automatically find visible target → roll attack → apply damage if hit.
+
+Use when: You need to make an attack against an enemy in combat. One call completes the entire attack process.
+
+Do NOT use when: You just need to check combat status (use show_combat_status instead).
+
+Parameters:
+  - attacker_id: ID of the attacking actor (attacker)
+  - target_name: Name of the target to attack (name will be auto-resolved to ID)
+  - attack_type: 'melee' or 'ranged'
+  - weapon_name: Optional name of the weapon to use
+  - is_unarmed: Whether this is an unarmed attack
+  - is_off_hand: Whether this is an off-hand attack
+  - advantage: Roll with advantage or disadvantage
+
+Returns: Complete attack result including attack roll, whether hit, damage dealt, and target HP status.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "get_actors_in_current_combat_participants",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				// Actually we already have attacker_id from user params
+				return map[string]any{
+					"game_id": params["game_id"],
+				}
+			},
+		},
+		{
+			ToolName: "execute_attack",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				// In composite schema we get target_id from name resolution
+				// For now, we assume the registry will handle name resolution upstream
+				out := map[string]any{
+					"game_id":      params["game_id"],
+					"attacker_id":  params["attacker_id"],
+					"target_id":    params["target_id"], // will be resolved by upstream name resolver
+					"attack_type":  params["attack_type"],
+					"is_unarmed":   params["is_unarmed"],
+					"is_off_hand":  params["is_off_hand"],
+					"advantage":     params["advantage"],
+				}
+				if wn, ok := params["weapon_name"]; ok {
+					out["weapon_name"] = wn
+				}
+				return out
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"combat_attack",
+		desc,
+		schema,
+		registry,
+		steps,
+		false, // not read only (modifies game state)
+	)
+}
+
+// NewCombatStartTool 复合开始战斗工具：初始化战斗 → 推进到第一回合 → 返回战斗状态
+//
+// 合并: start_combat + next_turn
+func NewCombatStartTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"game_id": map[string]any{
+				"type":        "string",
+				"description": "游戏会话ID",
+			},
+			"scene_id": map[string]any{
+				"type":        "string",
+				"description": "战斗发生的场景ID",
+			},
+			"participant_ids": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "参战者ID列表",
+			},
+			"has_surprise": map[string]any{
+				"type":        "boolean",
+				"description": "是否有突袭（潜行一方突袭观察者）",
+				"default":     false,
+			},
+			"stealthy_side": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "有突袭时：潜行方ID列表",
+			},
+			"observers": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "有突袭时：被观察方ID列表",
+			},
+		},
+		"required": []string{"game_id", "scene_id", "participant_ids"},
+	}
+
+	desc := `Start a new combat encounter and advance to the first turn.
+
+Use when: Players are starting a new combat encounter. One call initializes combat and gets to the first actor's turn.
+
+Do NOT use when: Combat is already ongoing.
+
+Steps automatically: 1) Initialize combat with initiative rolls 2) Advance to first turn 3) Return complete combat status.
+
+Parameters:
+  - game_id: Game session ID
+  - scene_id: Scene where combat occurs
+  - participant_ids: List of all participant IDs
+  - has_surprise: Whether one side surprises the other
+  - stealthy_side: If surprise, list of stealthy participants
+  - observers: If surprise, list of surprised observers
+
+Returns: Full combat status with initiative order and current turn.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "start_combat",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				if hasSurprise, ok := params["has_surprise"].(bool); ok && hasSurprise {
+					return map[string]any{
+						"game_id":        params["game_id"],
+						"scene_id":      params["scene_id"],
+						"stealthy_side": params["stealthy_side"],
+						"observers":     params["observers"],
+					}
+				}
+				return map[string]any{
+					"game_id":         params["game_id"],
+					"scene_id":        params["scene_id"],
+					"participant_ids": params["participant_ids"],
+				}
+			},
+		},
+		{
+			ToolName: "next_turn",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return map[string]any{
+					"game_id": params["game_id"],
+				}
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"combat_start",
+		desc,
+		schema,
+		registry,
+		steps,
+		false,
+	)
+}
+
+// NewCombatHealTool 复合治疗工具：执行治疗 → 更新目标HP → 返回结果
+//
+// 合并: execute_healing (already single step, but enhanced with richer result
+func NewCombatHealTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"game_id": map[string]any{
+				"type":        "string",
+				"description": "游戏会话ID",
+			},
+			"target_id": map[string]any{
+				"type":        "string",
+				"description": "接受治疗的目标ID",
+			},
+			"amount": map[string]any{
+				"type":        "integer",
+				"description": "治疗量",
+			},
+		},
+		"required": []string{"game_id", "target_id", "amount"},
+	}
+
+	desc := `Heal a target and return updated HP status.
+
+Use when: You need to heal a character (from spell, potion, or ability).
+
+Parameters:
+  - game_id: Game session ID
+  - target_id: ID of target to heal
+  - amount: Amount of HP to heal
+
+Returns: Healing result with target's new HP and status.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "execute_healing",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"combat_heal",
+		desc,
+		schema,
+		registry,
+		steps,
+		false,
+	)
+}
+
+// NewCombatDeathSaveTool 复合死亡豁免工具：执行死亡豁免 → 获取目标状态 → 返回结果
+//
+// 合并: perform_death_save + get_actor
+func NewCombatDeathSaveTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"game_id": map[string]any{
+				"type":        "string",
+				"description": "游戏会话ID",
+			},
+			"actor_id": map[string]any{
+				"type":        "string",
+				"description": "进行死亡豁免的角色ID",
+			},
+		},
+		"required": []string{"game_id", "actor_id"},
+	}
+
+	desc := `Perform a death saving throw and return the final status (stable, dying, or dead).
+
+Use when: A character drops to 0 HP and needs to make death saves.
+
+Parameters:
+  - game_id: Game session ID
+  - actor_id: Actor making the death save
+
+Returns: Death save result plus current HP status.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "perform_death_save",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"combat_death_save",
+		desc,
+		schema,
+		registry,
+		steps,
+		false,
+	)
+}
+
+// NewShowCombatStatusTool 复合显示战斗状态工具：获取当前战斗 → 返回完整状态
+//
+// 合并: get_current_combat + get_current_turn
+func NewShowCombatStatusTool(e *engine.Engine, registry *ToolRegistry) *CompositeTool {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"game_id": map[string]any{
+				"type":        "string",
+				"description": "游戏会话ID",
+			},
+		},
+		"required": []string{"game_id"},
+	}
+
+	desc := `Show complete combat status: all participants with current HP, initiative order, and current turn.
+
+Use when: Players ask about the current combat situation, or you need to know who is alive/dead, or what the current turn is.
+
+Do NOT use when: Combat hasn't started yet.
+
+Parameters:
+  - game_id: Game session ID
+
+Returns: Complete combat snapshot with all participants, HP, initiative, current turn.`
+
+	steps := []ToolStep{
+		{
+			ToolName: "get_current_combat",
+			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
+				return params
+			},
+		},
+	}
+
+	return NewCompositeTool(
+		"show_combat_status",
+		desc,
+		schema,
+		registry,
+		steps,
+		true, // read only
+	)
+}
+

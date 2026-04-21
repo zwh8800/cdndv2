@@ -184,6 +184,37 @@ func registerAgentTools(registry *tool.ToolRegistry, engine *engine.Engine) {
 	registry.Register(tool.NewListMagicItemsTool(engine), []string{agent.MainAgentName}, "data_query")
 	registry.Register(tool.NewListFeatsDataTool(engine), []string{agent.MainAgentName}, "data_query")
 	registry.Register(tool.NewGetFeatDataTool(engine), []string{agent.MainAgentName}, "data_query")
+
+	// ========== 复合工具 - 战斗系统 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewCombatAttackTool(engine, registry), []string{agent.SubAgentNameCombat}, "composite_combat")
+	registry.Register(tool.NewCombatStartTool(engine, registry), []string{agent.SubAgentNameCombat}, "composite_combat")
+	registry.Register(tool.NewCombatHealTool(engine, registry), []string{agent.SubAgentNameCombat}, "composite_combat")
+	registry.Register(tool.NewCombatDeathSaveTool(engine, registry), []string{agent.SubAgentNameCombat}, "composite_combat")
+	// 只读 - MainAgent + SubAgent
+	registry.Register(tool.NewShowCombatStatusTool(engine, registry), []string{agent.SubAgentNameCombat, agent.MainAgentName}, "composite_combat")
+
+	// ========== 复合工具 - 角色创建 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewCreateCharacterTool(engine, registry), []string{agent.SubAgentNameCharacter}, "composite_character")
+	// 只读 - character_agent + MainAgent
+	registry.Register(tool.NewQueryRacesTool(engine, registry), []string{agent.SubAgentNameCharacter, agent.MainAgentName}, "composite_character")
+	registry.Register(tool.NewQueryClassesTool(engine, registry), []string{agent.SubAgentNameCharacter, agent.MainAgentName}, "composite_character")
+	registry.Register(tool.NewQueryBackgroundsTool(engine, registry), []string{agent.SubAgentNameCharacter, agent.MainAgentName}, "composite_character")
+
+	// ========== 复合工具 - 场景系统 ==========
+	// 写操作 - 仅 SubAgent
+	registry.Register(tool.NewCreateConnectedSceneTool(engine, registry), []string{agent.SubAgentNameNarrative}, "composite_scene")
+	registry.Register(tool.NewMoveToSceneTool(engine, registry), []string{agent.SubAgentNameNarrative}, "composite_scene")
+	// 只读 - narrative_agent + MainAgent
+	registry.Register(tool.NewShowSceneDetailTool(engine, registry), []string{agent.SubAgentNameNarrative, agent.MainAgentName}, "composite_scene")
+
+	// ========== 复合工具 - 数据查询 ==========
+	// 只读 - MainAgent + 对应 SubAgent
+	registry.Register(tool.NewQuerySpellsTool(engine, registry), []string{agent.SubAgentNameCombat, agent.MainAgentName}, "composite_query")
+	registry.Register(tool.NewQueryEquipmentTool(engine, registry), []string{agent.SubAgentNameInventory, agent.MainAgentName}, "composite_query")
+	registry.Register(tool.NewQueryMonstersTool(engine, registry), []string{agent.MainAgentName}, "composite_query")
+	registry.Register(tool.NewQueryFeatsTool(engine, registry), []string{agent.MainAgentName}, "composite_query")
 }
 
 // createSubAgents 创建子Agent

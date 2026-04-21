@@ -319,7 +319,7 @@ func (c *ContextCompressor) compressOldMessages(ctx context.Context, messages []
 	if c.llmClient != nil {
 		summary, err := c.summarizeWithLLM(ctx, pruned)
 		if err == nil && summary != "" {
-			summaryContent := fmt.Sprintf("[\u5386\u53f2\u4e0a\u4e0b\u6587\u6458\u8981 - \u4ee5\u4e0b\u662f\u4e4b\u524d\u5bf9\u8bdd\u7684\u7ed3\u6784\u5316\u538b\u7f29\u7248\u672c]\n%s", summary)
+			summaryContent := fmt.Sprintf("[历史上下文摘要 - 以下是之前对话的结构化压缩版本]\n%s", summary)
 			return []Message{
 				NewSystemMessage(summaryContent),
 			}

@@ -4,167 +4,157 @@ This file provides guidance to Qoder (qoder.com) when working with code in this 
 
 ## Project Overview
 
-**cdndv2** is a D&D (Dungeons & Dragons) LLM-based game engine written in Go 1.24.2. It integrates with OpenAI's language models to create an interactive tabletop RPG experience using a multi-Agent architecture with a ReAct (Reasoning + Acting) loop pattern.
+**cdndv2** is a D&D 5e LLM game engine in Go. It uses OpenAI function calling with a multi-Agent ReAct loop to run tabletop RPG sessions.
 
-**Key Design Principle**: The `game_engine` NEVER performs game logic calculations. All D&D 5e rule execution (damage calculation, skill checks, leveling, etc.) is delegated to the `dnd-core` engine (`github.com/zwh8800/dnd-core`). The game_engine serves purely as an orchestrator and LLM interface.
+**Fundamental rule**: `game_engine` NEVER performs D&D rule calculations. All mechanics (damage, checks, leveling, etc.) are delegated to the `dnd-core` engine (`github.com/zwh8800/dnd-core`). The game_engine is purely an orchestrator and LLM interface.
 
-## Quick Start
-
-### Build and Run
+## Build, Test & Run
 
 ```bash
 # Build
 go build -o cdndv2 .
 
-# Run (requires OpenAI API key)
-export OPENAI_API_KEY=sk-your-key-here
-export OPENAI_MODEL=gpt-4o  # Optional, defaults to gpt-4o
-export OPENAI_BASE_URL=...  # Optional, for proxies
+# Run (interactive CLI)
+export OPENAI_API_KEY=sk-...
 ./cdndv2
+
+# Run all tests (integration tests require real OpenAI API key)
+OPENAI_API_KEY=sk-... go test ./...
+
+# Run a single test
+OPENAI_API_KEY=sk-... go test -run TestGameEngineFullFlow -v ./game_engine/
+
+# Run tests with custom model/endpoint
+OPENAI_API_KEY=sk-... OPENAI_MODEL=gpt-4o OPENAI_BASE_URL=https://... go test -v -timeout 10m ./game_engine/
 ```
 
-### Testing
-
-No test files currently exist in the repository. When adding tests, use Go's standard testing framework with `go test ./...` to run all tests.
+**Important**: Tests call real LLM APIs and are slow. Use `-timeout 10m` or longer for integration tests. Tests skip automatically when `OPENAI_API_KEY` is not set.
 
 ### Dependencies
 
-The project uses a local path replacement for dnd-core:
+Local path replacement for dnd-core — the `../dnd-core` directory must exist:
 ```
 replace github.com/zwh8800/dnd-core => ../dnd-core
 ```
 
-Ensure the `../dnd-core` directory exists and is properly set up.
-
 ## Architecture
 
-### High-Level Flow
+### Request Flow
 
 ```
-Player Input → ReAct Loop → Main Agent (DM) → SubAgents → Tools → D&D Core Engine → Response
+Player Input → GameEngine.ProcessInput()
+  → ReActLoop.Run() (state machine)
+    → PhaseObserve: CollectSummary() + async compression check
+    → PhaseRoute: RouterAgent decides which SubAgents to invoke
+    → PhaseThink: MainAgent reasons via LLM (read-only tools + delegate_task)
+    → PhaseAct: Execute tool calls, run SubAgent delegations
+    → PhaseSynthesize: Combine SubAgent results into narrative
+    → PhaseWait/PhaseEnd: Return response to player
 ```
 
-### Core Components
+### Read/Write Tool Separation (Critical Pattern)
 
-1. **ReAct Loop** (`game_engine/react_loop.go`)
-   - State machine with phases: Observe → Think → Act → Wait/End
-   - Enforces max iterations (default 10) to prevent infinite loops
-   - Observe: Collects game state via `CollectSummary()`
-   - Think: Calls Main Agent via LLM
-   - Act: Executes Tool/SubAgent calls
+MainAgent can ONLY use read-only tools + `delegate_task`. All write operations (creating characters, starting combat, casting spells, etc.) go through SubAgents. This is enforced at the registry level:
 
-2. **Main Agent** (`game_engine/agent/main_agent.go`)
-   - Central DM (Dungeon Master) decision-maker
-   - Builds dynamic system prompts with game state, Tools, SubAgents
-   - Calls OpenAI LLM with function calling
-   - Parses LLM responses to extract Tool calls, SubAgent calls, narrative content
+- **Read-only tools** are registered with `MainAgentName` in their agent list and have `ReadOnly() == true`
+- **Write tools** are registered ONLY with their domain SubAgent(s)
+- `delegate_task` is the only way MainAgent triggers state changes
 
-3. **SubAgents** (`game_engine/agent/*.go`)
-   - Character Agent: Role creation/management
-   - Combat Agent: Battle flow control
-   - Rules Agent: Rule checks/spell execution
-   - Narrative/NPC/Memory Agents: Planned for Phase 3+
-
-4. **Tool Registry** (`game_engine/tool/registry.go`)
-   - Maps ~92 D&D engine APIs to LLM-callable Tools
-   - Maintains indices by Tool name, Agent, and category
-   - Converts Tools to OpenAI function-calling format
-   - Executes Tools and formats results for LLM consumption
-
-5. **LLM Abstraction** (`game_engine/llm/`)
-   - Interface-based: `LLMClient` with `Complete()` and `Stream()`
-   - OpenAI implementation in `game_engine/llm/openai/`
-   - Configurable model, API key, BaseURL, temperature, maxTokens
-
-6. **State Management** (`game_engine/state/`)
-   - `GameSummary`: Wrapper around D&D engine state
-   - `CollectSummary()`: Queries engine and formats for LLM context
-   - LLM-friendly formatting utilities
-
-### Directory Structure
-
-```
-cdndv2/
-├── main.go                          # CLI entry point
-├── go.mod                           # Go module (v1.24.2)
-├── game_engine/
-│   ├── engine.go                    # GameEngine facade
-│   ├── react_loop.go                # ReAct loop state machine
-│   ├── agents.go                    # SubAgent factory & Tool registration
-│   ├── agent/                       # Multi-agent system
-│   │   ├── agent.go                 # Base interfaces
-│   │   ├── main_agent.go            # Main DM Agent
-│   │   └── *_agent.go               # SubAgents
-│   ├── tool/                        # Tool system
-│   │   ├── tool.go                  # Tool interface
-│   │   ├── registry.go              # ToolRegistry
-│   │   └── *_tools.go               # Tool implementations
-│   ├── llm/                         # LLM client abstraction
-│   │   ├── client.go                # LLMClient interface
-│   │   └── openai/                  # OpenAI implementation
-│   ├── state/                       # Game state management
-│   └── prompt/                      # Prompt templates
-└── docs/design/                     # Comprehensive design docs
-    ├── architecture.md              # System architecture (456 lines)
-    ├── agent-design.md              # Multi-agent design (884 lines)
-    ├── react-loop.md                # ReAct loop design (1059 lines)
-    └── tool-design.md               # Tool design (1070 lines)
+In `game_engine/agents.go`, registration follows this pattern:
+```go
+// Write — SubAgent only
+registry.Register(tool.NewCreatePCTool(engine), []string{agent.SubAgentNameCharacter}, "character")
+// Read — MainAgent + SubAgent
+registry.Register(tool.NewGetActorTool(engine), []string{agent.SubAgentNameCharacter, agent.MainAgentName}, "character")
 ```
 
-## Development Phases
+### SubAgent Base Class Pattern
 
-| Phase | Focus | Status |
-|-------|-------|--------|
-| Phase 1 | Core framework (Tool Registry, Main Agent, ReAct Loop) | Complete |
-| Phase 2 | Character + Combat + Rules agents | In Progress |
-| Phase 3 | Narrative, NPC, Memory agents | Planned |
-| Phase 4 | Optimization & error handling | Planned |
+All 11 SubAgents extend `BaseSubAgent` (in `game_engine/agent/base_sub_agent.go`) which provides:
+- System prompt loading from embedded markdown templates
+- Template data injection (GameID, PlayerID, GameState, AvailableTools, KnownEntityIDs)
+- LLM calling and response parsing
+- Intent matching via keywords in `CanHandle()`
 
-See `.qoder/specs/` for detailed implementation plans.
+Each concrete agent only needs to supply a `SubAgentConfig` struct:
+```go
+agent.NewBaseSubAgent(SubAgentConfig{
+    Name:         SubAgentNameCombat,
+    TemplateFile: "combat_system.md",
+    Priority:     90,
+    Keywords:     []string{"攻击", "战斗", ...},
+    ExtraTemplateData: func(ctx *AgentContext) map[string]any { ... },
+}, registry, llmClient)
+```
 
-## Key Patterns & Conventions
+### Embedded Prompt Template System
 
-### Adding a New SubAgent
+All agent system prompts live in `game_engine/prompt/*.md` and are embedded at build time via `//go:embed *.md`. Templates use Go `text/template` syntax with these standard variables:
+- `{{.GameID}}`, `{{.PlayerID}}` — session identifiers
+- `{{.GameState}}` — formatted game state summary
+- `{{.AvailableTools}}` — list of tool names/descriptions
+- `{{.KnownEntityIDs}}` — entity ID mappings for SubAgent coordination
 
-1. Create `game_engine/agent/new_agent.go` implementing `SubAgent` interface
-2. Define system prompt template in `game_engine/prompt/`
-3. Register Tools for the agent in `game_engine/agents.go`
-4. Add to factory function `createSubAgents()`
+Load and render via `prompt.LoadAndRender("combat_system.md", data)`.
 
-### Adding New Tools
+### Async Context Compression
 
-1. Create Tool struct implementing `Tool` interface
-2. Implement `Execute()` to call D&D engine API
-3. Register in `registerAgentTools()` in `game_engine/agents.go`
-4. Associate with relevant Agents
+`game_engine/llm/context_compressor.go` prevents context window overflow:
+- Estimates token usage with Chinese/English-aware heuristics + dynamic calibration
+- Triggers background LLM-driven summarization when usage exceeds 75% of window
+- Preserves the 3 most recent conversation rounds intact
+- Non-blocking: results are applied on the next `ProcessInput()` call
+- Falls back to heuristic truncation when LLM client is nil
 
-### Interface-Based Design
+### Router Agent
 
-All core components use interfaces:
-- `Agent`, `SubAgent` in `game_engine/agent/agent.go`
-- `Tool` in `game_engine/tool/tool.go`
-- `LLMClient` in `game_engine/llm/client.go`
+`game_engine/agent/router_agent.go` analyzes player input and produces a `RouterDecision`:
+- Determines which SubAgents should handle the request
+- Specifies sequential vs parallel execution mode
+- Can provide a direct response if no agent delegation is needed
 
-This enables testing and swapping implementations easily.
+### Entity ID Sharing Between Agents
 
-### Context Passing
+`AgentContext.KnownEntityIDs` is a `map[string]string` that propagates entity references (actor_id, scene_id) across SubAgent boundaries. The ReActLoop populates it from game state during PhaseObserve, and it's injected into every SubAgent's system prompt so they use correct IDs when calling tools.
 
-`AgentContext` carries state, history, and engine reference throughout the system. Agents access game state through context rather than tight coupling.
+## Key Interfaces
 
-## Important Design Documents
+| Interface | Location | Methods |
+|-----------|----------|---------|
+| `Agent` | `game_engine/agent/agent.go` | `Name()`, `Description()`, `SystemPrompt(ctx)`, `Tools()`, `Execute(ctx, req)` |
+| `SubAgent` | `game_engine/agent/agent.go` | extends Agent + `CanHandle(intent)`, `Priority()`, `Dependencies()` |
+| `Tool` | `game_engine/tool/tool.go` | `Name()`, `Description()`, `ParametersSchema()`, `Execute(ctx, params)`, `ReadOnly()` |
+| `LLMClient` | `game_engine/llm/client.go` | `Complete(ctx, req)`, `Stream(ctx, req)` |
 
-Comprehensive design documentation is available in `docs/design/`:
-- **architecture.md**: Full system architecture with diagrams
-- **agent-design.md**: Multi-Agent patterns, interfaces, and prompts
-- **react-loop.md**: State machine and loop phase explanations
-- **tool-design.md**: Tool registry and schema definitions
+## Adding a New SubAgent
 
-These documents should be consulted before making architectural changes.
+1. Create `game_engine/agent/new_agent.go` — construct a `BaseSubAgent` with `SubAgentConfig`
+2. Add agent name constant to `game_engine/agent/const.go`
+3. Create system prompt template `game_engine/prompt/new_system.md`
+4. Register the agent's tools in `registerAgentTools()` in `game_engine/agents.go`
+5. Add to `createSubAgents()` map in `game_engine/agents.go`
+
+## Adding a New Tool
+
+1. Create tool struct embedding `EngineTool` (for engine-backed tools) or `BaseTool`
+2. Set `readOnly: true` if the tool does not modify game state
+3. Implement `Execute(ctx, params)` — call dnd-core engine API, return `*ToolResult`
+4. Register in `registerAgentTools()` with appropriate agent associations and category
+5. Read-only tools can include `agent.MainAgentName` in their agent list; write tools must not
 
 ## Environment Variables
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `OPENAI_API_KEY` | OpenAI API key | Required |
-| `OPENAI_MODEL` | Model to use | `gpt-4o` |
+| `OPENAI_MODEL` | Model name | `gpt-4o` |
 | `OPENAI_BASE_URL` | Custom API endpoint | OpenAI default |
+| `LOG_LEVEL` | Logging level (debug/info/warn/error) | `info` |
+
+## Design Documents
+
+Consult `docs/design/` before making architectural changes:
+- `architecture.md` — system architecture
+- `agent-design.md` — multi-agent patterns and interfaces
+- `react-loop.md` — ReAct state machine
+- `tool-design.md` — tool registry and schema definitions

@@ -47,16 +47,17 @@ type LoopState struct {
 
 // ReActLoop ReAct循环控制器
 type ReActLoop struct {
-	engine    *engine.Engine
-	mainAgent agent.Agent
-	router    *agent.RouterAgent
-	agents    map[string]agent.SubAgent
-	tools     *tool.ToolRegistry
-	llm       llm.LLMClient
-	state     *LoopState
-	maxIter   int
-	useRouter bool
-	logger    *zap.Logger
+	engine     *engine.Engine
+	mainAgent  agent.Agent
+	router     *agent.RouterAgent
+	agents     map[string]agent.SubAgent
+	tools      *tool.ToolRegistry
+	llm        llm.LLMClient
+	state      *LoopState
+	maxIter    int
+	useRouter  bool
+	logger     *zap.Logger
+	compressor *llm.ContextCompressor // 上下文压缩器
 }
 
 // getLogger 获取日志器
@@ -78,14 +79,15 @@ func NewReActLoop(
 	maxIter int,
 ) *ReActLoop {
 	return &ReActLoop{
-		engine:    e,
-		mainAgent: mainAgent,
-		router:    router,
-		agents:    agents,
-		tools:     tools,
-		llm:       llmClient,
-		maxIter:   maxIter,
-		useRouter: router != nil,
+		engine:     e,
+		mainAgent:  mainAgent,
+		router:     router,
+		agents:     agents,
+		tools:      tools,
+		llm:        llmClient,
+		maxIter:    maxIter,
+		useRouter:  router != nil,
+		compressor: llm.DefaultContextCompressor(),
 		state: &LoopState{
 			CurrentPhase: PhaseObserve,
 			History:      make([]llm.Message, 0),
@@ -98,6 +100,57 @@ func NewReActLoop(
 func (l *ReActLoop) SetLogger(log *zap.Logger) {
 	if log != nil {
 		l.logger = log
+	}
+}
+
+// SetCompressor 设置上下文压缩器
+func (l *ReActLoop) SetCompressor(compressor *llm.ContextCompressor) {
+	if compressor != nil {
+		l.compressor = compressor
+	}
+}
+
+// maybeCompressHistory 检查并在需要时触发异步压缩
+// 两步式流程：
+// Step 1: 检查是否有已完成的后台压缩结果，如有则应用
+// Step 2: 检查是否需要启动新的后台压缩（不阻塞当前请求）
+func (l *ReActLoop) maybeCompressHistory() {
+	log := l.getLogger()
+
+	if l.compressor == nil {
+		return
+	}
+
+	// Step 1: 检查是否有已完成的后台压缩结果，如有则应用
+	if compressed := l.compressor.ApplyCompressedIfReady(); compressed != nil {
+		beforeLen := len(l.state.History)
+		l.state.History = compressed
+		log.Info("Applied async compressed history",
+			zap.Int("beforeMessages", beforeLen),
+			zap.Int("afterMessages", len(compressed)),
+		)
+		// 同步到 agentContext
+		if l.state.agentContext != nil {
+			l.state.agentContext.History = l.state.History
+		}
+		return
+	}
+
+	// Step 2: 检查是否需要启动新的后台压缩
+	// 如果已有压缩任务在运行，跳过本次检查，避免重复启动
+	if l.compressor.IsCompressing() {
+		return
+	}
+	if l.compressor.NeedsCompression(l.state.History) {
+		// 拷贝当前历史快照，启动后台压缩
+		snapshot := make([]llm.Message, len(l.state.History))
+		copy(snapshot, l.state.History)
+		l.compressor.StartAsyncCompress(snapshot)
+		log.Info("Async compression started in background",
+			zap.Int("historyMessages", len(snapshot)),
+			zap.Int("estimatedTokens", l.compressor.EstimateTokens(snapshot)),
+		)
+		// 当前请求继续使用未压缩的完整历史，不阻塞
 	}
 }
 
@@ -247,6 +300,9 @@ func (l *ReActLoop) observe(ctx context.Context) {
 		l.populateKnownEntityIDsFromSummary(summary)
 	}
 
+	// 检查并执行上下文压缩（在进入 Think/Route 阶段前）
+	l.maybeCompressHistory()
+
 	// 如果启用了Router，转入路由阶段；否则直接转入思考阶段
 	if l.useRouter {
 		l.state.CurrentPhase = PhaseRoute
@@ -392,6 +448,12 @@ func (l *ReActLoop) think(ctx context.Context) (*agent.AgentResponse, error) {
 		return nil, err
 	}
 
+	// 校准 token 估算（利用 LLM 返回的实际 usage）
+	if l.compressor != nil && resp.Usage.PromptTokens > 0 {
+		estimated := l.compressor.EstimateTokens(l.state.History)
+		l.compressor.CalibrateWithActualUsage(estimated, resp.Usage.PromptTokens)
+	}
+
 	log.Debug("MainAgent.Execute completed",
 		zap.String("content", truncateString(resp.Content, 200)),
 		zap.Int("toolCalls", len(resp.ToolCalls)),
@@ -477,6 +539,8 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 			return PhaseSynthesize
 		}
 
+		// 检查压缩（委托完成后可能追加了大量 tool 消息）
+		l.maybeCompressHistory()
 		return PhaseThink
 
 	case agent.ActionContinue:
@@ -516,6 +580,8 @@ func (l *ReActLoop) act(ctx context.Context) Phase {
 				l.state.agentContext.History = l.state.History
 			}
 
+			// 检查压缩（工具调用完成后可能追加了大量 tool 消息）
+			l.maybeCompressHistory()
 			return PhaseThink
 		}
 

@@ -236,6 +236,7 @@ func (m *MainAgent) parseResponse(resp *llm.CompletionResponse) (*AgentResponse,
 
 	agentResp := &AgentResponse{
 		Content: resp.Content,
+		Usage:   resp.Usage,
 	}
 
 	// 处理Tool调用

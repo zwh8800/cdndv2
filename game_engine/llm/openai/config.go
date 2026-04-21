@@ -16,14 +16,19 @@ type OpenAIConfig struct {
 
 	// MaxTokens 最大token数，默认4096
 	MaxTokens int
+
+	// ContextWindowSize 模型上下文窗口大小（token数），默认128000（gpt-4o）
+	// 用于上下文压缩判断
+	ContextWindowSize int
 }
 
 // DefaultOpenAIConfig 返回默认配置
 func DefaultOpenAIConfig() OpenAIConfig {
 	return OpenAIConfig{
-		Model:       "gpt-4o",
-		Temperature: 1.0,
-		MaxTokens:   4096,
+		Model:             "gpt-4o",
+		Temperature:       1.0,
+		MaxTokens:         4096,
+		ContextWindowSize: 128000,
 	}
 }
 
@@ -40,6 +45,9 @@ func (c *OpenAIConfig) Validate() error {
 	}
 	if c.MaxTokens <= 0 {
 		c.MaxTokens = 4096
+	}
+	if c.ContextWindowSize <= 0 {
+		c.ContextWindowSize = 128000
 	}
 	return nil
 }

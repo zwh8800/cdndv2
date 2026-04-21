@@ -137,6 +137,13 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	)
 	reactLoop.SetLogger(logger)
 
+	// 配置上下文压缩器
+	compressor := llm.DefaultContextCompressor()
+	if cfg.LLMConfig.ContextWindowSize > 0 {
+		compressor.ContextWindowSize = cfg.LLMConfig.ContextWindowSize
+	}
+	reactLoop.SetCompressor(compressor)
+
 	return &GameEngine{
 		dndEngine: dndEngine,
 		reactLoop: reactLoop,
@@ -236,6 +243,17 @@ func (ge *GameEngine) LoadGame(ctx context.Context, gameID model.ID) (*GameSessi
 
 // ProcessInput 处理玩家输入
 func (ge *GameEngine) ProcessInput(ctx context.Context, session *GameSession, input string) (string, error) {
+	// 在新一轮输入开始时，应用上一轮触发的后台压缩结果
+	if session.reactLoop.compressor != nil {
+		if compressed := session.reactLoop.compressor.ApplyCompressedIfReady(); compressed != nil {
+			ge.logger.Info("Applied async compressed history",
+				zap.Int("beforeLen", len(session.reactLoop.state.History)),
+				zap.Int("afterLen", len(compressed)),
+			)
+			session.reactLoop.state.History = compressed
+		}
+	}
+
 	// 保存历史长度，用于出错时回滚
 	historyLenBefore := len(session.reactLoop.state.History)
 

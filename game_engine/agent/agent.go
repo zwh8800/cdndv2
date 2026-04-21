@@ -55,7 +55,7 @@ type AgentContext struct {
 	AgentResults   map[string]*AgentCallResult // SubAgent 执行结果
 	Parent         *AgentContext               // 父会话引用（SubAgent隔离用）
 	IsSubSession   bool                        // 是否为子会话
-	KnownEntityIDs map[string]string            // 已知实体ID映射（如 actor_id, scene_id 等），用于 SubAgent 间共享
+	KnownEntityIDs map[string]string           // 已知实体ID映射（如 actor_id, scene_id 等），用于 SubAgent 间共享
 }
 
 // AgentRequest Agent请求
@@ -114,6 +114,7 @@ type AgentResponse struct {
 	NextAction        NextAction     `json:"next_action"`         // 下一步动作
 	StateChange       *StateChange   `json:"state_change"`        // 状态变更
 	Errors            []AgentError   `json:"errors"`              // 错误信息
+	Usage             llm.Usage      `json:"usage"`               // LLM token 用量
 }
 
 // NextAction 下一步动作类型

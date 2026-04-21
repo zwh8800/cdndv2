@@ -495,9 +495,11 @@ func TestIsQueryTool(t *testing.T) {
 		{"cast_spell", false},
 		{"", false},
 	}
+	t.Logf("[查询工具] 共 %d 个测试用例", len(tests))
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := llm.ExportIsQueryTool(tt.name)
+			t.Logf("[查询工具] isQueryTool(%q) = %v (期望 %v)", tt.name, got, tt.expected)
 			if got != tt.expected {
 				t.Errorf("isQueryTool(%q) = %v, want %v", tt.name, got, tt.expected)
 			}
@@ -516,9 +518,11 @@ func TestContainsEntityID(t *testing.T) {
 		{`simple text`, false},
 		{``, false},
 	}
+	t.Logf("[实体ID] 共 %d 个测试用例", len(tests))
 	for _, tt := range tests {
 		t.Run(tt.content, func(t *testing.T) {
 			got := llm.ExportContainsEntityID(tt.content)
+			t.Logf("[实体ID] containsEntityID(%q) = %v (期望 %v)", tt.content, got, tt.expected)
 			if got != tt.expected {
 				t.Errorf("containsEntityID(%q) = %v, want %v", tt.content, got, tt.expected)
 			}
@@ -538,22 +542,30 @@ func TestSummarizeWithRealLLM(t *testing.T) {
 		msgs := makeDnDHistory()
 
 		t.Logf("[LLM摘要] 开始调用 LLM 生成 D&D 结构化摘要，输入 %d 条消息...", len(msgs))
+		for i, m := range msgs {
+			t.Logf("[LLM摘要]   消息[%d] Role=%s, Content前50字=%.50s, ToolCalls=%d", i, m.Role, m.Content, len(m.ToolCalls))
+		}
 		start := time.Now()
 		summary, err := c.ExportSummarizeWithLLM(context.Background(), msgs)
-		t.Logf("[LLM摘要] 调用完成，耗时 %.1fs", time.Since(start).Seconds())
+		elapsed := time.Since(start)
+		t.Logf("[LLM摘要] 调用完成，耗时 %.1fs", elapsed.Seconds())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+		t.Logf("[LLM摘要] 摘要长度: %d 字符", len(summary))
 		t.Logf("LLM Summary:\n%s", summary)
 		if summary == "" {
 			t.Fatal("expected non-empty summary")
 		}
 
 		summaryLower := strings.ToLower(summary)
-		if !strings.Contains(summaryLower, "aldric") && !strings.Contains(summary, "战士") {
+		hasName := strings.Contains(summaryLower, "aldric") || strings.Contains(summary, "战士")
+		hasEntityID := strings.Contains(summary, "01H")
+		t.Logf("[LLM摘要] 验证: 包含角色名/职业=%v, 包含实体ID=%v", hasName, hasEntityID)
+		if !hasName {
 			t.Error("expected summary to mention the character name or class")
 		}
-		if !strings.Contains(summary, "01H") {
+		if !hasEntityID {
 			t.Error("expected entity IDs to be preserved in summary")
 		}
 	})
@@ -562,14 +574,18 @@ func TestSummarizeWithRealLLM(t *testing.T) {
 		c := llm.DefaultContextCompressor(client)
 		msgs := makeDnDHistory()
 
-		t.Logf("[LLM摘要] 验证战斗信息保留，调用 LLM...")
+		t.Logf("[LLM摘要] 验证战斗信息保留，输入 %d 条消息，调用 LLM...", len(msgs))
 		start := time.Now()
 		summary, err := c.ExportSummarizeWithLLM(context.Background(), msgs)
-		t.Logf("[LLM摘要] 调用完成，耗时 %.1fs", time.Since(start).Seconds())
+		elapsed := time.Since(start)
+		t.Logf("[LLM摘要] 调用完成，耗时 %.1fs, 摘要长度: %d", elapsed.Seconds(), len(summary))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !strings.Contains(summary, "哥布林") && !strings.Contains(strings.ToLower(summary), "goblin") {
+		hasGoblin := strings.Contains(summary, "哥布林") || strings.Contains(strings.ToLower(summary), "goblin")
+		t.Logf("[LLM摘要] 验证: 包含哥布林/goblin=%v", hasGoblin)
+		t.Logf("[LLM摘要] 完整摘要:\n%s", summary)
+		if !hasGoblin {
 			t.Error("expected summary to mention goblin encounter")
 		}
 	})
@@ -631,11 +647,22 @@ func TestRealLLMCompressHistory(t *testing.T) {
 		c.RecentKeepRounds = 1
 		msgs := makeDnDHistory()
 
-		t.Logf("[完整压缩] 原始消息数: %d, RecentKeepRounds: %d", len(msgs), c.RecentKeepRounds)
-		t.Logf("[完整压缩] 开始 CompressHistory（含 LLM 调用）...")
+		initTokens := c.EstimateTokens(msgs)
+		t.Logf("[完整压缩] 原始消息数: %d, 估算Token: %d, RecentKeepRounds: %d", len(msgs), initTokens, c.RecentKeepRounds)
+		for i, m := range msgs {
+			t.Logf("[完整压缩]   原始消息[%d] Role=%s, Len=%d, ToolCalls=%d", i, m.Role, len(m.Content), len(m.ToolCalls))
+		}
+		t.Log("[完整压缩] 开始 CompressHistory（含 LLM 调用）...")
 		start := time.Now()
 		result := c.CompressHistory(context.Background(), msgs)
-		t.Logf("[完整压缩] 完成，耗时 %.1fs, 压缩后消息数: %d", time.Since(start).Seconds(), len(result))
+		elapsed := time.Since(start)
+		resultTokens := c.EstimateTokens(result)
+		t.Logf("[完整压缩] 完成，耗时 %.1fs", elapsed.Seconds())
+		t.Logf("[完整压缩] 消息数: %d -> %d, Token: %d -> %d, 压缩率: %.1f%%",
+			len(msgs), len(result), initTokens, resultTokens, float64(resultTokens)/float64(initTokens)*100)
+		for i, m := range result {
+			t.Logf("[完整压缩]   结果消息[%d] Role=%s, Len=%d", i, m.Role, len(m.Content))
+		}
 
 		if len(result) >= len(msgs) {
 			t.Error("expected compression to reduce message count")
@@ -646,7 +673,7 @@ func TestRealLLMCompressHistory(t *testing.T) {
 		if !strings.Contains(result[0].Content, "历史上下文摘要") {
 			t.Error("expected summary header")
 		}
-		t.Logf("Summary:\n%s", result[0].Content)
+		t.Logf("[完整压缩] Summary:\n%s", result[0].Content)
 	})
 }
 
@@ -722,7 +749,8 @@ func TestTwoLevelCompressionWithRealLLM(t *testing.T) {
 	client := newRealLLMClient(t)
 
 	t.Run("LLM receives pruned content", func(t *testing.T) {
-		t.Logf("[两级压缩] 测试 Level1 Prune + Level2 LLM 摘要组合效果")
+		t.Log("[两级压缩] 测试 Level1 Prune + Level2 LLM 摘要组合效果")
+		t.Log("[两级压缩] 流程: 原始消息 -> Prune修剪 -> LLM摘要 -> 拼接最近轮次")
 		c := llm.DefaultContextCompressor(client)
 		c.RecentKeepRounds = 1
 
@@ -743,10 +771,28 @@ func TestTwoLevelCompressionWithRealLLM(t *testing.T) {
 			llm.NewAssistantMessage("好的", nil),
 		}
 
-		t.Logf("[两级压缩] 原始消息数: %d, 开始 CompressHistory...", len(msgs))
+		initTokens := c.EstimateTokens(msgs)
+		t.Logf("[两级压缩] 原始消息数: %d, 估算Token: %d", len(msgs), initTokens)
+		for i, m := range msgs {
+			t.Logf("[两级压缩]   消息[%d] Role=%s, Len=%d, ToolCalls=%d", i, m.Role, len(m.Content), len(m.ToolCalls))
+		}
+
+		// 先单独测试 Prune 效果
+		pruned := c.ExportPruneOldMessages(msgs)
+		prunedTokens := c.EstimateTokens(pruned)
+		t.Logf("[两级压缩] Prune结果: Token %d -> %d (节省 %.1f%%)", initTokens, prunedTokens, (1-float64(prunedTokens)/float64(initTokens))*100)
+
+		t.Log("[两级压缩] 开始 CompressHistory（Prune + LLM）...")
 		start := time.Now()
 		result := c.CompressHistory(context.Background(), msgs)
-		t.Logf("[两级压缩] 完成，耗时 %.1fs, Original: %d -> Compressed: %d", time.Since(start).Seconds(), len(msgs), len(result))
+		elapsed := time.Since(start)
+		resultTokens := c.EstimateTokens(result)
+		t.Logf("[两级压缩] 完成，耗时 %.1fs", elapsed.Seconds())
+		t.Logf("[两级压缩] 消息: %d -> %d, Token: %d -> %d, 总压缩率: %.1f%%",
+			len(msgs), len(result), initTokens, resultTokens, float64(resultTokens)/float64(initTokens)*100)
+		for i, m := range result {
+			t.Logf("[两级压缩]   结果[%d] Role=%s, Len=%d", i, m.Role, len(m.Content))
+		}
 
 		if len(result) >= len(msgs) {
 			t.Error("expected compression")
@@ -755,7 +801,7 @@ func TestTwoLevelCompressionWithRealLLM(t *testing.T) {
 			if strings.Contains(result[0].Content, "detailed character data") {
 				t.Error("summary should not contain raw query data")
 			}
-			t.Logf("Summary:\n%s", result[0].Content)
+			t.Logf("[两级压缩] Summary:\n%s", result[0].Content)
 		}
 	})
 }
@@ -911,21 +957,25 @@ func TestAsyncCompressionWithRealLLM(t *testing.T) {
 		c.RecentKeepRounds = 1
 		msgs := makeDnDHistory()
 
-		t.Logf("[异步LLM] 启动异步压缩，输入 %d 条消息...", len(msgs))
+		initTokens := c.EstimateTokens(msgs)
+		t.Logf("[异步LLM] 启动异步压缩，输入 %d 条消息, 估算Token: %d", len(msgs), initTokens)
+		t.Logf("[异步LLM] IsCompressing=%v (启动前)", c.IsCompressing())
 		start := time.Now()
 		c.StartAsyncCompress(context.Background(), msgs)
+		t.Logf("[异步LLM] IsCompressing=%v (启动后)", c.IsCompressing())
 
 		// 真实 LLM 单次调用可能需要 30-50 秒，等待上限设为 120 秒
 		for i := 0; i < 600; i++ {
 			if !c.IsCompressing() {
+				t.Logf("[异步LLM] 压缩在第 %d 次检查时完成 (%.1fs)", i+1, time.Since(start).Seconds())
 				break
 			}
-			if (i+1)%50 == 0 {
-				t.Logf("[异步LLM] 等待中... 已等待 %.0fs", time.Since(start).Seconds())
+			if (i+1)%25 == 0 {
+				t.Logf("[异步LLM] 等待中... 已等待 %.0fs, IsCompressing=%v", time.Since(start).Seconds(), c.IsCompressing())
 			}
 			time.Sleep(200 * time.Millisecond)
 		}
-		t.Logf("[异步LLM] 压缩完成，总耗时 %.1fs", time.Since(start).Seconds())
+		t.Logf("[异步LLM] 总耗时 %.1fs", time.Since(start).Seconds())
 		if c.IsCompressing() {
 			t.Fatal("async compression should have completed within 120s")
 		}
@@ -934,11 +984,16 @@ func TestAsyncCompressionWithRealLLM(t *testing.T) {
 		if result == nil {
 			t.Fatal("expected compressed result from real LLM")
 		}
-		t.Logf("Async: %d -> %d messages", len(msgs), len(result))
+		resultTokens := c.EstimateTokens(result)
+		t.Logf("[异步LLM] 消息: %d -> %d, Token: %d -> %d, 压缩率: %.1f%%",
+			len(msgs), len(result), initTokens, resultTokens, float64(resultTokens)/float64(initTokens)*100)
+		for i, m := range result {
+			t.Logf("[异步LLM]   结果[%d] Role=%s, Len=%d", i, m.Role, len(m.Content))
+		}
 		if result[0].Role != llm.RoleSystem {
 			t.Errorf("expected system role, got %s", result[0].Role)
 		}
-		t.Logf("Summary:\n%s", result[0].Content)
+		t.Logf("[异步LLM] Summary:\n%s", result[0].Content)
 	})
 }
 
@@ -1010,51 +1065,64 @@ func TestCalibrateWithActualUsage(t *testing.T) {
 
 func TestEdgeCases(t *testing.T) {
 	t.Run("compress nil messages", func(t *testing.T) {
+		t.Log("[边界] 测试压缩 nil 消息")
 		c := llm.DefaultContextCompressor(nil)
-		if c.CompressHistory(context.Background(), nil) != nil {
+		result := c.CompressHistory(context.Background(), nil)
+		t.Logf("[边界] CompressHistory(nil) = %v", result)
+		if result != nil {
 			t.Error("expected nil for nil messages")
 		}
 	})
 
 	t.Run("compress empty slice", func(t *testing.T) {
+		t.Log("[边界] 测试压缩空切片")
 		c := llm.DefaultContextCompressor(nil)
 		result := c.CompressHistory(context.Background(), []llm.Message{})
+		t.Logf("[边界] CompressHistory([]) = %v (len=%d)", result, len(result))
 		if result != nil && len(result) != 0 {
 			t.Error("expected empty result")
 		}
 	})
 
 	t.Run("single message not compressed", func(t *testing.T) {
+		t.Log("[边界] 测试单条消息不压缩")
 		c := llm.DefaultContextCompressor(nil)
 		c.RecentKeepRounds = 1
 		msgs := []llm.Message{llm.NewUserMessage("hello")}
 		result := c.CompressHistory(context.Background(), msgs)
+		t.Logf("[边界] 单条消息: 输入=%d, 输出=%d", len(msgs), len(result))
 		if len(result) != 1 {
 			t.Errorf("expected 1 message, got %d", len(result))
 		}
 	})
 
 	t.Run("nil LLMClient fallback", func(t *testing.T) {
+		t.Log("[边界] 测试 nil LLMClient 回退")
 		c := llm.DefaultContextCompressor(nil)
 		c.RecentKeepRounds = 1
 		msgs := makeHistory(5)
 		result := c.CompressHistory(context.Background(), msgs)
+		t.Logf("[边界] nil LLMClient: %d -> %d 条消息", len(msgs), len(result))
 		if len(result) >= len(msgs) {
 			t.Error("expected compression")
 		}
 	})
 
 	t.Run("prune empty messages", func(t *testing.T) {
+		t.Log("[边界] 测试 Prune nil 消息")
 		c := llm.DefaultContextCompressor(nil)
 		result := c.ExportPruneOldMessages(nil)
+		t.Logf("[边界] PruneOldMessages(nil) len=%d", len(result))
 		if len(result) != 0 {
 			t.Error("expected empty result")
 		}
 	})
 
 	t.Run("heuristic fallback for empty messages", func(t *testing.T) {
+		t.Log("[边界] 测试启发式压缩 nil 消息")
 		c := llm.DefaultContextCompressor(nil)
 		result := c.ExportCompressOldMessagesHeuristic(nil)
+		t.Logf("[边界] CompressOldMessagesHeuristic(nil) = %v", result)
 		if result != nil {
 			t.Error("expected nil")
 		}
@@ -1066,11 +1134,16 @@ func TestEdgeCases(t *testing.T) {
 		c.SetCalibrationRatio(1.0)
 		msgs := makeHistory(100)
 
-		t.Logf("[性能] 压缩 %d 条消息（100轮）...", len(msgs))
+		initTokens := c.EstimateTokens(msgs)
+		t.Logf("[性能] 压缩 %d 条消息（100轮），估算Token: %d, RecentKeepRounds=%d", len(msgs), initTokens, c.RecentKeepRounds)
 		start := time.Now()
 		result := c.CompressHistory(context.Background(), msgs)
 		elapsed := time.Since(start)
-		t.Logf("[性能] 完成，耗时 %v, 压缩后: %d 条消息", elapsed, len(result))
+		resultTokens := c.EstimateTokens(result)
+		t.Logf("[性能] 完成，耗时 %v", elapsed)
+		t.Logf("[性能] 消息: %d -> %d, Token: %d -> %d, 压缩率: %.1f%%",
+			len(msgs), len(result), initTokens, resultTokens, float64(resultTokens)/float64(initTokens)*100)
+		t.Logf("[性能] 结果首条 Role=%s, 末条 Role=%s", result[0].Role, result[len(result)-1].Role)
 
 		if elapsed > 2*time.Second {
 			t.Errorf("took too long: %v", elapsed)
@@ -1081,10 +1154,14 @@ func TestEdgeCases(t *testing.T) {
 	})
 
 	t.Run("estimateStringTokens edge cases", func(t *testing.T) {
-		if llm.ExportEstimateStringTokens("") != 0 {
+		emptyTokens := llm.ExportEstimateStringTokens("")
+		singleTokens := llm.ExportEstimateStringTokens("a")
+		longTokens := llm.ExportEstimateStringTokens(strings.Repeat("hello world ", 100))
+		t.Logf("[Token边界] empty=%d, single='a'=%d, long(1200字)=%d", emptyTokens, singleTokens, longTokens)
+		if emptyTokens != 0 {
 			t.Error("empty string should be 0 tokens")
 		}
-		if llm.ExportEstimateStringTokens("a") <= 0 {
+		if singleTokens <= 0 {
 			t.Error("single char should be > 0 tokens")
 		}
 	})

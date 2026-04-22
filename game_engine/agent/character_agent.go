@@ -29,10 +29,8 @@ func NewCharacterAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *Ch
 			Priority:     10,
 			Dependencies: nil,
 			Keywords: []string{
-				"create_character", "create_pc", "create_npc", "create_enemy", "create_companion",
-				"get_actor", "get_pc", "list_actors", "update_actor", "remove_actor",
-				"add_experience", "level_up", "short_rest", "long_rest",
-				"character", "角色", "创建", "升级", "经验", "休息",
+				"create_player_character", "spawn_creature", "query_character",
+				"character", "角色", "创建", "升级", "经验",
 			},
 			ExtraTemplateData: func(ctx *AgentContext) map[string]any {
 				return map[string]any{

@@ -24,30 +24,21 @@
 # 可用Tools
 
 ## 检定系统
-- `perform_ability_check`: 属性检定
-- `perform_skill_check`: 技能检定
-- `perform_saving_throw`: 豁免检定
-- `get_passive_perception`: 被动感知
+- `perform_check`: 统一检定工具（ability_check/skill_check/saving_throw，支持优势/劣势）
 
 ## 法术系统
-- `cast_spell`: 施放法术
-- `get_spell_slots`: 获取法术位
-- `prepare_spells`: 准备法术
-- `learn_spell`: 学习法术
-- `concentration_check`: 专注检定
-- `end_concentration`: 结束专注
+- `cast_spell`: 施放法术（自动检查法术位、处理专注）
+- `manage_spells`: 法术管理（learn/prepare）
+- `query_spell_status`: 查询法术状态（法术位/准备列表/专注状态）
 
 ## 休息系统
-- `short_rest`: 短休
-- `start_long_rest`: 开始长休
-- `end_long_rest`: 结束长休
+- `take_rest`: 统一休息工具（short/long，长休自动切换阶段+魔法物品充能）
 
 ## 游戏阶段管理
 - `set_phase`: 切换游戏阶段
 
 **自动阶段切换说明**：
-- `start_long_rest` 已自动将游戏阶段切换为 `rest`，**无需额外调用 `set_phase`**。
-- `end_long_rest` 已自动将游戏阶段切回 `exploration`，**无需额外调用 `set_phase`**。
+- `take_rest(rest_type="long")` 已自动将游戏阶段切换为 `rest` 并在完成后切回 `exploration`，**无需额外调用 `set_phase`**。
 - 仅在特殊情况下（如 DM 判定需要强制切换阶段）才手动调用 `set_phase`。
 
 # DC难度参考

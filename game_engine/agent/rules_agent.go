@@ -23,10 +23,9 @@ func NewRulesAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *RulesA
 			Priority:     5,
 			Dependencies: nil,
 			Keywords: []string{
+				"perform_check", "cast_spell", "manage_spells", "take_rest", "query_spell_status",
 				"check", "save", "spell", "concentration", "skill",
-				"perform_ability_check", "perform_skill_check", "perform_saving_throw",
-				"cast_spell", "get_spell_slots", "concentration_check",
-				"检定", "豁免", "法术", "专注", "技能",
+				"检定", "豁免", "法术", "专注", "技能", "休息",
 			},
 		}, registry, llmClient),
 	}

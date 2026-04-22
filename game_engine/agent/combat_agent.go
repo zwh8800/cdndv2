@@ -23,9 +23,8 @@ func NewCombatAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *Comba
 			Priority:     20,
 			Dependencies: []string{SubAgentNameCharacter},
 			Keywords: []string{
-				"attack", "combat", "turn", "damage", "heal", "move",
-				"start_combat", "end_combat", "next_turn", "execute_attack",
-				"战斗", "攻击", "回合", "伤害", "治疗", "移动",
+				"initiate_combat", "combat_action", "resolve_combat", "query_combat",
+				"combat", "战斗", "攻击", "回合", "伤害", "治疗", "移动",
 			},
 		}, registry, llmClient),
 	}

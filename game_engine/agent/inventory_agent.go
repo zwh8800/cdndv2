@@ -27,11 +27,8 @@ func NewInventoryAgent(registry *tool.ToolRegistry, llmClient llm.LLMClient) *In
 			Priority:     15,
 			Dependencies: []string{SubAgentNameCharacter},
 			Keywords: []string{
-				"add_item", "remove_item", "get_inventory",
-				"equip_item", "unequip_item", "get_equipment",
-				"transfer_item", "attune_item", "unattune_item",
-				"add_currency", "use_magic_item", "recharge", "magic_item",
-				"inventory", "物品", "装备", "库存", "调谐", "货币", "金币",
+				"manage_item", "equip_item", "use_item", "query_inventory",
+				"inventory", "物品", "装备", "库存", "调谐", "货币", "金币", "魔法物品",
 			},
 		}, registry, llmClient),
 	}

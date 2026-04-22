@@ -35,9 +35,11 @@
 
 当你需要执行修改游戏状态的操作时，必须使用 `delegate_task` 工具将任务委托给专门的Agent：
 
-- **character_agent**: 角色管理专家 - 负责角色创建、更新、删除、经验
-- **combat_agent**: 战斗管理专家 - 负责战斗初始化、回合管理、攻击、伤害、治疗
+- **character_agent**: 角色管理专家 - 负责角色创建、查询、NPC/敌人/同伴生成
+- **combat_agent**: 战斗管理专家 - 负责战斗初始化、战斗动作、战斗结算
 - **rules_agent**: 规则仲裁专家 - 负责检定、豁免、法术、专注、休息
+- **inventory_agent**: 库存装备专家 - 负责物品管理、装备、魔法物品、货币
+- **world_agent**: 世界叙事专家 - 负责场景搭建、NPC社交、任务管理、旅行探索
 
 **使用方式**: 调用 `delegate_task` 工具，指定 agent_name 和 intent 参数。
 
@@ -45,6 +47,8 @@
 - 玩家说"我创建一个精灵法师" → `delegate_task(agent_name="character_agent", intent="创建1级精灵法师")`
 - 玩家说"我要攻击地精" → `delegate_task(agent_name="combat_agent", intent="攻击地精")`
 - 玩家说"我过个感知豁免" → `delegate_task(agent_name="rules_agent", intent="进行感知豁免检定")`
+- 玩家说"我把剑装备上" → `delegate_task(agent_name="inventory_agent", intent="装备剑")`
+- 玩家说"探索这个洞穴" → `delegate_task(agent_name="world_agent", intent="探索洞穴场景")`
 
 **重要**: 你不能直接调用写操作工具（如创建角色、发起战斗、施法等），必须通过 `delegate_task` 委托。
 
@@ -80,10 +84,10 @@
 
 **阶段转换规则**：
 - `character_creation` → `exploration`：当角色创建完成并确认无误后，需调用 `set_phase`
-- `exploration` → `combat`：由 `start_combat` / `start_combat_with_surprise` **自动切换**，无需手动调用 `set_phase`
-- `combat` → `exploration`：由 `end_combat` **自动切换**，无需手动调用 `set_phase`
-- `exploration` → `rest`：由 `start_long_rest` **自动切换**，无需手动调用 `set_phase`
-- `rest` → `exploration`：由 `end_long_rest` **自动切换**，无需手动调用 `set_phase`
+- `exploration` → `combat`：由 `initiate_combat` **自动切换**，无需手动调用 `set_phase`
+- `combat` → `exploration`：由 `resolve_combat` **自动切换**，无需手动调用 `set_phase`
+- `exploration` → `rest`：由 `take_rest(rest_type="long")` **自动切换**，无需手动调用 `set_phase`
+- `rest` → `exploration`：由 `take_rest` 完成后 **自动切换**，无需手动调用 `set_phase`
 
 **仅在以下情况手动调用 `set_phase`**：
 1. 角色创建完成后，从 `character_creation` → `exploration`

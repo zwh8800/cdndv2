@@ -21,8 +21,8 @@ func NewDelegateTaskTool() *DelegateTaskTool {
 		"properties": map[string]any{
 			"agent_name": map[string]any{
 				"type":        "string",
-				"enum":        []string{"character_agent", "combat_agent", "rules_agent"},
-				"description": "要委托的Agent名称：character_agent(角色管理)、combat_agent(战斗管理)、rules_agent(规则检定)",
+				"enum":        []string{"character_agent", "combat_agent", "rules_agent", "inventory_agent", "world_agent"},
+				"description": "要委托的Agent名称：character_agent(角色管理)、combat_agent(战斗管理)、rules_agent(规则检定)、inventory_agent(库存装备)、world_agent(世界叙事/场景/任务/旅行)",
 			},
 			"intent": map[string]any{
 				"type":        "string",
@@ -39,7 +39,7 @@ func NewDelegateTaskTool() *DelegateTaskTool {
 	return &DelegateTaskTool{
 		BaseTool: BaseTool{
 			name:        DelegateTaskToolName,
-			description: "将任务委托给专门的Agent处理。用于角色管理、战斗操作、规则检定等专业任务。当你需要执行复杂的游戏操作时，使用此工具委托给对应的专家Agent。",
+			description: "将任务委托给专门的Agent处理。用于角色管理、战斗操作、规则检定、库存装备、世界叙事等专业任务。当你需要执行复杂的游戏操作时，使用此工具委托给对应的专家Agent。",
 			schema:      schema,
 		},
 	}

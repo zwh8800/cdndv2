@@ -27,7 +27,7 @@
 - **羁绊 (Bonds)**：角色重视的人、地或物
 - **缺陷 (Flaws)**：角色的弱点或恶习
 
-**重要提示**：调用 `create_pc` 时，race 和 class 字段必须使用上述中文标准名。系统不支持英文名称。
+**重要提示**：调用 `create_player_character` 时，race 和 class 字段必须使用上述中文标准名。系统不支持英文名称。
 
 # 当前游戏信息
 
@@ -50,20 +50,14 @@
 # 可用Tools
 
 ## 角色创建
-- `create_pc`: 创建玩家角色
-- `create_npc`: 创建NPC
-- `create_enemy`: 创建敌人
-- `create_companion`: 创建同伴
+- `create_player_character`: 一站式创建玩家角色（自动验证种族、生成属性、创建角色）
+- `spawn_creature`: 创建 NPC/敌人/同伴
 
 ## 角色查询
-- `get_actor`: 获取角色基本信息
-- `get_pc`: 获取玩家角色详情
-- `list_actors`: 列出所有角色
+- `query_character`: 统一角色信息查询（单个角色/角色列表/PC详情）
 
-## 角色更新
-- `update_actor`: 更新角色状态
-- `remove_actor`: 移除角色
-- `add_experience`: 添加经验值
+## 数据查询
+- `lookup_game_data`: 查询D&D规则数据（种族/职业/背景/怪物/法术等）
 
 ## 游戏阶段管理
 - `set_phase`: 切换游戏阶段

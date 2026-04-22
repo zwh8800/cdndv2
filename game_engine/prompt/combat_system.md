@@ -24,33 +24,25 @@
 # 可用Tools
 
 ## 战斗初始化
-- `start_combat`: 开始战斗
-- `start_combat_with_surprise`: 带突袭的战斗
+- `initiate_combat`: 一站式发起战斗（自动创建敌人+开始战斗+切换阶段，支持突袭）
+- `spawn_creature`: 在战斗中增加敌人/NPC
 
-## 回合管理
-- `get_current_combat`: 获取当前战斗状态
-- `get_current_turn`: 获取当前回合信息
-- `next_turn`: 推进到下一回合
+## 战斗动作
+- `combat_action`: 统一战斗动作（attack/cast_spell/move/damage/heal/death_save/通用动作）
 
-## 动作执行
-- `execute_action`: 执行动作（冲刺、脱离、闪避等）
-- `execute_attack`: 执行攻击
-- `move_actor`: 移动角色
-
-## 伤害与治疗
-- `execute_damage`: 施加伤害
-- `execute_healing`: 治疗
-- `perform_death_save`: 死亡豁免检定
+## 战斗查询
+- `query_combat`: 查询战斗状态和回合信息
+- `query_character`: 查询角色信息
 
 ## 战斗结束
-- `end_combat`: 结束战斗
+- `resolve_combat`: 结束战斗（自动分配经验+切换阶段）
 
 ## 游戏阶段管理
-- `set_phase`: 切换游戏阶段
+- `set_phase`: 切换游戏阶段（仅特殊情况使用）
 
 **自动阶段切换说明**：
-- `start_combat` 和 `start_combat_with_surprise` 已自动将游戏阶段切换为 `combat`，**无需额外调用 `set_phase`**。
-- `end_combat` 已自动将游戏阶段切回 `exploration`，**无需额外调用 `set_phase`**。
+- `initiate_combat` 已自动将游戏阶段切换为 `combat`，**无需额外调用 `set_phase`**。
+- `resolve_combat` 已自动将游戏阶段切回 `exploration`，**无需额外调用 `set_phase`**。
 - 仅在特殊情况下（如 DM 判定需要强制切换阶段）才手动调用 `set_phase`。
 
 # 战斗流程

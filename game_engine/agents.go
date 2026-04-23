@@ -22,7 +22,7 @@ func registerAgentTools(registry *tool.ToolRegistry, engine *engine.Engine) {
 	registry.Register(tool.NewRemoveActorTool(engine), []string{agent.SubAgentNameCharacter}, "character")
 	registry.Register(tool.NewAddExperienceTool(engine), []string{agent.SubAgentNameCharacter}, "character")
 	// 只读 - MainAgent + SubAgent
-	registry.Register(tool.NewGetActorTool(engine), []string{agent.SubAgentNameCharacter, agent.SubAgentNameCombat, agent.MainAgentName}, "character")
+	registry.Register(tool.NewGetActorTool(engine), []string{agent.SubAgentNameCharacter, agent.SubAgentNameCombat, agent.MainAgentName, agent.CombatDMAgentName}, "character")
 	registry.Register(tool.NewGetPCTool(engine), []string{agent.SubAgentNameCharacter, agent.MainAgentName}, "character")
 	registry.Register(tool.NewListActorsTool(engine), []string{agent.SubAgentNameCharacter, agent.MainAgentName}, "character")
 
@@ -37,10 +37,15 @@ func registerAgentTools(registry *tool.ToolRegistry, engine *engine.Engine) {
 	registry.Register(tool.NewExecuteDamageTool(engine), []string{agent.SubAgentNameCombat}, "combat")
 	registry.Register(tool.NewExecuteHealingTool(engine), []string{agent.SubAgentNameCombat}, "combat")
 	registry.Register(tool.NewPerformDeathSaveTool(engine), []string{agent.SubAgentNameCombat}, "combat")
-	registry.Register(tool.NewEndCombatTool(engine), []string{agent.SubAgentNameCombat}, "combat")
-	// 只读 - MainAgent + SubAgent
-	registry.Register(tool.NewGetCurrentCombatTool(engine), []string{agent.SubAgentNameCombat, agent.MainAgentName}, "combat")
-	registry.Register(tool.NewGetCurrentTurnTool(engine), []string{agent.SubAgentNameCombat, agent.MainAgentName}, "combat")
+	registry.Register(tool.NewEndCombatTool(engine), []string{agent.SubAgentNameCombat, agent.CombatDMAgentName}, "combat")
+	// 只读 - MainAgent + SubAgent + CombatDMAgent
+	registry.Register(tool.NewGetCurrentCombatTool(engine), []string{agent.SubAgentNameCombat, agent.MainAgentName, agent.CombatDMAgentName}, "combat")
+	registry.Register(tool.NewGetCurrentTurnTool(engine), []string{agent.SubAgentNameCombat, agent.MainAgentName, agent.CombatDMAgentName}, "combat")
+
+	// ========== CombatDM Agent 专用工具 ==========
+	// 这些工具封装了 dnd-core 组合型战斗API，供 CombatDMAgent 的 LLM 自主调用
+	registry.Register(tool.NewExecuteTurnActionTool(engine), []string{agent.CombatDMAgentName}, "combat_dm")
+	registry.Register(tool.NewNextTurnWithActionsTool(engine), []string{agent.CombatDMAgentName}, "combat_dm")
 
 	// ========== 规则检定工具（合并到 combat_agent） ==========
 	// 写操作 - 仅 SubAgent

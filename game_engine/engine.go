@@ -46,6 +46,7 @@ type GameEngine struct {
 	registry  *tool.ToolRegistry
 	mainAgent *agent.MainAgent
 	llmClient llm.LLMClient
+	enemyAI   *agent.EnemyAIAgent // 敌人AI Agent，供战斗session共享
 	config    EngineConfig
 	logger    *zap.Logger
 }
@@ -119,6 +120,9 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 	mainAgent := agent.NewMainAgent(registry, llmClient)
 	mainAgent.SetLogger(logger)
 
+	// 创建敌人AI Agent（供战斗session共享）
+	enemyAI := agent.NewEnemyAIAgent(llmClient, logger)
+
 	// 创建ReAct循环
 	maxIter := cfg.MaxIterations
 	if maxIter == 0 {
@@ -156,6 +160,7 @@ func NewGameEngine(cfg EngineConfig) (*GameEngine, error) {
 		registry:  registry,
 		mainAgent: mainAgent,
 		llmClient: llmClient,
+		enemyAI:   enemyAI,
 		config:    cfg,
 		logger:    logger,
 	}, nil
@@ -249,6 +254,87 @@ func (ge *GameEngine) LoadGame(ctx context.Context, gameID model.ID) (*GameSessi
 
 // ProcessInput 处理玩家输入
 func (ge *GameEngine) ProcessInput(ctx context.Context, session *GameSession, input string) (string, error) {
+	// === 战斗拦截路由 ===
+
+	// 1. 如果有活跃的战斗session，将输入交给它处理
+	if session.combatSession != nil {
+		result, err := session.combatSession.ProcessInput(ctx, input)
+		if err != nil {
+			return "", err
+		}
+
+		if result.CombatEnded {
+			// 将战斗摘要注入主历史
+			if result.Summary != "" {
+				session.reactLoop.state.History = append(
+					session.reactLoop.state.History,
+					llm.NewAssistantMessage(result.Summary, nil),
+				)
+			}
+			session.combatSession = nil // 释放战斗session
+			ge.logger.Info("Combat ended, control returned to MainAgent")
+		}
+		return result.Response, nil
+	}
+
+	// 2. 检查游戏phase是否进入了战斗（由之前的MainAgent触发）
+	phase, _ := ge.dndEngine.GetPhase(ctx, session.ID)
+	if phase == model.PhaseCombat {
+		ge.logger.Info("Detected combat phase, creating CombatSession")
+		session.combatSession = NewCombatSession(
+			session.ID,
+			session.PlayerID,
+			ge.llmClient,
+			ge.registry,
+			ge.dndEngine,
+			ge.enemyAI,
+			ge.logger,
+		)
+		result, err := session.combatSession.Initialize(ctx)
+		if err != nil {
+			ge.logger.Error("Failed to initialize CombatSession", zap.Error(err))
+			session.combatSession = nil // 初始化失败，回退到正常流程
+		} else {
+			if result.CombatEnded {
+				if result.Summary != "" {
+					session.reactLoop.state.History = append(
+						session.reactLoop.state.History,
+						llm.NewAssistantMessage(result.Summary, nil),
+					)
+				}
+				session.combatSession = nil
+				return result.Response, nil
+			}
+
+			// 初始化成功且战斗进行中。如果正在等待玩家输入，
+			// 将原始输入作为玩家的第一个战斗指令尝试转发
+			if session.combatSession.IsWaitingForPlayer() && input != "" {
+				actionResult, err := session.combatSession.ProcessInput(ctx, input)
+				if err != nil {
+					// 转发失败，只返回初始化描述，玩家可以重新输入
+					ge.logger.Warn("Failed to forward input to combat session", zap.Error(err))
+					return result.Response, nil
+				}
+				// 合并初始化描述与动作结果
+				response := result.Response + "\n\n---\n\n" + actionResult.Response
+				if actionResult.CombatEnded {
+					if actionResult.Summary != "" {
+						session.reactLoop.state.History = append(
+							session.reactLoop.state.History,
+							llm.NewAssistantMessage(actionResult.Summary, nil),
+						)
+					}
+					session.combatSession = nil
+				}
+				return response, nil
+			}
+
+			return result.Response, nil
+		}
+	}
+
+	// === 正常路径：MainAgent ReActLoop ===
+
 	// 在新一轮输入开始时，应用上一轮触发的后台压缩结果
 	if session.reactLoop.compressor != nil {
 		if compressed := session.reactLoop.compressor.ApplyCompressedIfReady(); compressed != nil {
@@ -316,10 +402,11 @@ func (ge *GameEngine) Close() error {
 
 // GameSession 游戏会话
 type GameSession struct {
-	ID        model.ID
-	PlayerID  model.ID
-	Engine    *GameEngine
-	reactLoop *ReActLoop
+	ID            model.ID
+	PlayerID      model.ID
+	Engine        *GameEngine
+	reactLoop     *ReActLoop
+	combatSession *CombatSession // 战斗时非nil，接管ProcessInput
 }
 
 // GetID 获取会话ID

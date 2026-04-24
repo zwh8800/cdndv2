@@ -37,6 +37,11 @@ func (m *MainAgent) SetLogger(log *zap.Logger) {
 	}
 }
 
+// SetLLMClient 设置 LLM 客户端，主要用于测试和运行时热切换。
+func (m *MainAgent) SetLLMClient(client llm.LLMClient) {
+	m.llm = client
+}
+
 // getLogger 获取日志器
 func (m *MainAgent) getLogger() *zap.Logger {
 	if m.logger == nil {

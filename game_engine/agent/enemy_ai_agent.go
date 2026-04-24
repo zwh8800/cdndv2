@@ -33,6 +33,11 @@ func (a *EnemyAIAgent) Name() string {
 	return EnemyAIAgentName
 }
 
+// SetLLMClient 设置 LLM 客户端，主要用于测试和运行时热切换。
+func (a *EnemyAIAgent) SetLLMClient(client llm.LLMClient) {
+	a.llmClient = client
+}
+
 // SystemPrompt 加载并渲染敌人AI系统提示词
 func (a *EnemyAIAgent) SystemPrompt(actorName, actorType string) string {
 	rendered, err := prompt.LoadAndRender("enemy_ai_system.md", map[string]any{

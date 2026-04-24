@@ -69,6 +69,7 @@ func (cs *CombatSession) Initialize(ctx context.Context) (*CombatResult, error) 
 	return &CombatResult{
 		Response:    result.Response,
 		CombatEnded: result.CombatEnded,
+		Summary:     result.Summary,
 	}, nil
 }
 
@@ -86,5 +87,6 @@ func (cs *CombatSession) ProcessInput(ctx context.Context, input string) (*Comba
 	return &CombatResult{
 		Response:    result.Response,
 		CombatEnded: result.CombatEnded,
+		Summary:     result.Summary,
 	}, nil
 }

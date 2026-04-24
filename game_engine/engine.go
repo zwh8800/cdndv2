@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/zwh8800/dnd-core/pkg/engine"
@@ -212,6 +213,14 @@ func (ge *GameEngine) GetLLMClient() llm.LLMClient {
 // SetLLMClient 设置LLM客户端
 func (ge *GameEngine) SetLLMClient(client llm.LLMClient) {
 	ge.llmClient = client
+	if ge.reactLoop != nil {
+		ge.reactLoop.SetLLMClient(client)
+	} else if ge.mainAgent != nil {
+		ge.mainAgent.SetLLMClient(client)
+	}
+	if ge.enemyAI != nil {
+		ge.enemyAI.SetLLMClient(client)
+	}
 }
 
 // SetMainAgent 设置主Agent
@@ -247,13 +256,16 @@ func (ge *GameEngine) LoadGame(ctx context.Context, gameID model.ID) (*GameSessi
 	}
 
 	return &GameSession{
-		ID:     gameID,
-		Engine: ge,
+		ID:        gameID,
+		Engine:    ge,
+		reactLoop: ge.reactLoop,
 	}, nil
 }
 
 // ProcessInput 处理玩家输入
 func (ge *GameEngine) ProcessInput(ctx context.Context, session *GameSession, input string) (string, error) {
+	ge.ensureSessionRuntime(session)
+
 	// === 战斗拦截路由 ===
 
 	// 1. 如果有活跃的战斗session，将输入交给它处理
@@ -263,73 +275,19 @@ func (ge *GameEngine) ProcessInput(ctx context.Context, session *GameSession, in
 			return "", err
 		}
 
-		if result.CombatEnded {
-			// 将战斗摘要注入主历史
-			if result.Summary != "" {
-				session.reactLoop.state.History = append(
-					session.reactLoop.state.History,
-					llm.NewAssistantMessage(result.Summary, nil),
-				)
-			}
-			session.combatSession = nil // 释放战斗session
-			ge.logger.Info("Combat ended, control returned to MainAgent")
-		}
+		ge.handleCombatResult(session, result)
 		return result.Response, nil
 	}
 
 	// 2. 检查游戏phase是否进入了战斗（由之前的MainAgent触发）
 	phase, _ := ge.dndEngine.GetPhase(ctx, session.ID)
 	if phase == model.PhaseCombat {
-		ge.logger.Info("Detected combat phase, creating CombatSession")
-		session.combatSession = NewCombatSession(
-			session.ID,
-			session.PlayerID,
-			ge.llmClient,
-			ge.registry,
-			ge.dndEngine,
-			ge.enemyAI,
-			ge.logger,
-		)
-		result, err := session.combatSession.Initialize(ctx)
+		response, handled, err := ge.startCombatSession(ctx, session, input, true)
 		if err != nil {
-			ge.logger.Error("Failed to initialize CombatSession", zap.Error(err))
-			session.combatSession = nil // 初始化失败，回退到正常流程
-		} else {
-			if result.CombatEnded {
-				if result.Summary != "" {
-					session.reactLoop.state.History = append(
-						session.reactLoop.state.History,
-						llm.NewAssistantMessage(result.Summary, nil),
-					)
-				}
-				session.combatSession = nil
-				return result.Response, nil
-			}
-
-			// 初始化成功且战斗进行中。如果正在等待玩家输入，
-			// 将原始输入作为玩家的第一个战斗指令尝试转发
-			if session.combatSession.IsWaitingForPlayer() && input != "" {
-				actionResult, err := session.combatSession.ProcessInput(ctx, input)
-				if err != nil {
-					// 转发失败，只返回初始化描述，玩家可以重新输入
-					ge.logger.Warn("Failed to forward input to combat session", zap.Error(err))
-					return result.Response, nil
-				}
-				// 合并初始化描述与动作结果
-				response := result.Response + "\n\n---\n\n" + actionResult.Response
-				if actionResult.CombatEnded {
-					if actionResult.Summary != "" {
-						session.reactLoop.state.History = append(
-							session.reactLoop.state.History,
-							llm.NewAssistantMessage(actionResult.Summary, nil),
-						)
-					}
-					session.combatSession = nil
-				}
-				return response, nil
-			}
-
-			return result.Response, nil
+			return "", err
+		}
+		if handled {
+			return response, nil
 		}
 	}
 
@@ -378,15 +336,109 @@ func (ge *GameEngine) ProcessInput(ctx context.Context, session *GameSession, in
 	}
 
 	// 获取响应内容
+	mainResponse := ""
 	history := session.reactLoop.GetHistory()
 	if len(history) > 0 {
 		lastMsg := history[len(history)-1]
 		if lastMsg.Role == llm.RoleAssistant && lastMsg.Content != "" {
-			return lastMsg.Content, nil
+			mainResponse = lastMsg.Content
 		}
 	}
 
-	return "", nil
+	// MainAgent/SubAgent 本轮可能刚启动战斗。此时立即让 CombatSession 接管并返回开场态势。
+	phase, _ = ge.dndEngine.GetPhase(ctx, session.ID)
+	if phase == model.PhaseCombat {
+		combatResponse, handled, err := ge.startCombatSession(ctx, session, "", false)
+		if err != nil {
+			return "", err
+		}
+		if handled {
+			return joinNonEmpty(mainResponse, combatResponse), nil
+		}
+	}
+
+	return mainResponse, nil
+}
+
+func (ge *GameEngine) ensureSessionRuntime(session *GameSession) {
+	if session == nil {
+		return
+	}
+	if session.Engine == nil {
+		ge.logger.Debug("Repairing GameSession Engine reference",
+			zap.String("gameID", string(session.ID)),
+		)
+		session.Engine = ge
+	}
+	if session.reactLoop == nil {
+		ge.logger.Debug("Repairing GameSession ReActLoop reference",
+			zap.String("gameID", string(session.ID)),
+		)
+		session.reactLoop = ge.reactLoop
+	}
+}
+
+func (ge *GameEngine) startCombatSession(ctx context.Context, session *GameSession, input string, forwardInput bool) (string, bool, error) {
+	ge.logger.Info("Detected combat phase, creating CombatSession")
+	session.combatSession = NewCombatSession(
+		session.ID,
+		session.PlayerID,
+		ge.llmClient,
+		ge.registry,
+		ge.dndEngine,
+		ge.enemyAI,
+		ge.logger,
+	)
+
+	result, err := session.combatSession.Initialize(ctx)
+	if err != nil {
+		ge.logger.Error("Failed to initialize CombatSession", zap.Error(err))
+		session.combatSession = nil
+		return "", false, fmt.Errorf("failed to initialize combat session: %w", err)
+	}
+	if ge.handleCombatResult(session, result) {
+		return result.Response, true, nil
+	}
+
+	if forwardInput && session.combatSession != nil && session.combatSession.IsWaitingForPlayer() && input != "" {
+		actionResult, err := session.combatSession.ProcessInput(ctx, input)
+		if err != nil {
+			ge.logger.Warn("Failed to forward input to combat session", zap.Error(err))
+			return result.Response, true, nil
+		}
+		response := joinNonEmpty(result.Response, actionResult.Response)
+		ge.handleCombatResult(session, actionResult)
+		return response, true, nil
+	}
+
+	return result.Response, true, nil
+}
+
+func (ge *GameEngine) handleCombatResult(session *GameSession, result *CombatResult) bool {
+	if result == nil || !result.CombatEnded {
+		return false
+	}
+	if result.Summary != "" && session != nil && session.reactLoop != nil && session.reactLoop.state != nil {
+		session.reactLoop.state.History = append(
+			session.reactLoop.state.History,
+			llm.NewAssistantMessage(result.Summary, nil),
+		)
+	}
+	if session != nil {
+		session.combatSession = nil
+	}
+	ge.logger.Info("Combat ended, control returned to MainAgent")
+	return true
+}
+
+func joinNonEmpty(parts ...string) string {
+	nonEmpty := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			nonEmpty = append(nonEmpty, trimmed)
+		}
+	}
+	return strings.Join(nonEmpty, "\n\n---\n\n")
 }
 
 // RegisterTool 注册Tool

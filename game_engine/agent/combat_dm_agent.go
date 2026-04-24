@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,6 +27,7 @@ const (
 type CombatAgentResult struct {
 	Response    string // 返回给玩家的叙述文本
 	CombatEnded bool   // 战斗是否结束
+	Summary     string // 战斗结束时交还给 MainAgent 的事实摘要
 }
 
 type combatIntentType string
@@ -83,6 +85,8 @@ type CombatDMAgent struct {
 	turnState     *turnStateCache                   // 当前回合状态（从引擎查询）
 	cachedActions *dndengine.AvailableActionsResult // 缓存的当前角色可用动作
 	ended         bool                              // 战斗结束标记
+	events        []combatActionEvent               // 战斗事实事件，用于战后摘要
+	summary       string                            // 已生成的战后摘要
 
 	toolSchemas []map[string]any // 缓存的工具 schema（LLM 格式）
 }
@@ -127,6 +131,11 @@ func (a *CombatDMAgent) IsEnded() bool {
 	return a.ended
 }
 
+// Summary 返回战斗结束时生成的事实摘要。
+func (a *CombatDMAgent) Summary() string {
+	return a.summary
+}
+
 // Initialize 初始化战斗会话
 // 添加系统提示词到历史，然后运行第一轮循环（无玩家输入）
 func (a *CombatDMAgent) Initialize(ctx context.Context) (*CombatAgentResult, error) {
@@ -143,7 +152,10 @@ func (a *CombatDMAgent) Initialize(ctx context.Context) (*CombatAgentResult, err
 // LLM 只参与自然语言动作解析与叙事生成。
 func (a *CombatDMAgent) RunLoop(ctx context.Context, input string) (*CombatAgentResult, error) {
 	if a.ended {
-		return &CombatAgentResult{Response: "战斗已经结束。", CombatEnded: true}, nil
+		if a.summary == "" {
+			a.summary = a.generateCombatSummary(ctx, nil)
+		}
+		return &CombatAgentResult{Response: "战斗已经结束。", CombatEnded: true, Summary: a.summary}, nil
 	}
 	if input != "" {
 		a.history = append(a.history, llm.NewUserMessage(input))
@@ -154,7 +166,10 @@ func (a *CombatDMAgent) RunLoop(ctx context.Context, input string) (*CombatAgent
 		return nil, err
 	}
 	if a.ended {
-		return &CombatAgentResult{Response: "战斗已经结束。", CombatEnded: true}, nil
+		if a.summary == "" {
+			a.summary = a.generateCombatSummary(ctx, nil)
+		}
+		return &CombatAgentResult{Response: "战斗已经结束。", CombatEnded: true, Summary: a.summary}, nil
 	}
 
 	if a.isPlayerTurn() {
@@ -173,7 +188,7 @@ func (a *CombatDMAgent) RunLoop(ctx context.Context, input string) (*CombatAgent
 			allResponses = append(allResponses, event.Message)
 		}
 		if event.CombatEnded {
-			return &CombatAgentResult{Response: strings.Join(allResponses, "\n\n"), CombatEnded: true}, nil
+			return &CombatAgentResult{Response: strings.Join(allResponses, "\n\n"), CombatEnded: true, Summary: a.summary}, nil
 		}
 		if err := a.refreshTurnState(ctx); err != nil {
 			return nil, err
@@ -196,6 +211,7 @@ func (a *CombatDMAgent) RunLoop(ctx context.Context, input string) (*CombatAgent
 	return &CombatAgentResult{
 		Response:    strings.Join(allResponses, "\n\n"),
 		CombatEnded: ended,
+		Summary:     a.summary,
 	}, nil
 }
 
@@ -369,6 +385,11 @@ func (a *CombatDMAgent) processCurrentActorInput(ctx context.Context, input stri
 	}
 
 	event.Message = a.narrateEvent(ctx, event)
+	a.recordCombatEvent(event)
+	if event.CombatEnded {
+		a.summary = a.generateCombatSummary(ctx, &event)
+		a.endCombatInEngine(ctx)
+	}
 	a.history = append(a.history, llm.NewAssistantMessage(event.Message, nil))
 	a.trimHistoryIfNeeded()
 	return &event, nil
@@ -397,6 +418,11 @@ func (a *CombatDMAgent) advanceTurn(ctx context.Context, fallbackMessage string)
 	}
 	if event.CombatEnded {
 		event.Message = a.narrateEvent(ctx, event)
+		a.recordCombatEvent(event)
+		a.summary = a.generateCombatSummary(ctx, &event)
+		a.endCombatInEngine(ctx)
+	} else if event.Message != "" {
+		a.recordCombatEvent(event)
 	}
 	a.history = append(a.history, llm.NewAssistantMessage(event.Message, nil))
 	return &event, nil
@@ -639,9 +665,12 @@ func (a *CombatDMAgent) refreshTurnState(ctx context.Context) error {
 		GameID: a.gameID,
 	})
 	if err != nil {
-		// 战斗不活跃（可能已结束）
-		a.ended = true
-		a.logger.Info("Combat ended (GetCurrentCombat returned error)", zap.Error(err))
+		if errors.Is(err, dndengine.ErrCombatNotActive) {
+			// 战斗不活跃（可能已结束）
+			a.ended = true
+			a.logger.Info("Combat ended (GetCurrentCombat returned no active combat)", zap.Error(err))
+			return nil
+		}
 		return err
 	}
 	if combatResult.Combat.Status != model.CombatStatusActive {
@@ -711,6 +740,10 @@ func (a *CombatDMAgent) generateEnemyIntent(ctx context.Context) (string, error)
 	battlefield := a.formatBattlefieldSummary(ctx)
 	actionsText := a.formatAvailableActions()
 
+	if a.enemyAI == nil {
+		return "采取最直接的攻击行动", nil
+	}
+
 	return a.enemyAI.GenerateIntent(
 		ctx,
 		a.turnState.ActorName,
@@ -775,6 +808,154 @@ func (a *CombatDMAgent) formatAvailableActions() string {
 	formatActions("附赠动作", a.cachedActions.BonusActions)
 	formatActions("自由动作", a.cachedActions.FreeActions)
 	return sb.String()
+}
+
+func (a *CombatDMAgent) recordCombatEvent(event combatActionEvent) {
+	if event.Message == "" && event.ExecuteResult == nil && event.NextTurnResult == nil {
+		return
+	}
+	a.events = append(a.events, event)
+}
+
+func (a *CombatDMAgent) generateCombatSummary(ctx context.Context, finalEvent *combatActionEvent) string {
+	fallback := a.fallbackCombatSummary(finalEvent)
+	if a.llmClient == nil {
+		return fallback
+	}
+
+	eventLines := make([]string, 0, len(a.events))
+	for _, event := range a.events {
+		eventLines = append(eventLines, summarizeCombatEvent(event))
+	}
+	payload, err := json.Marshal(map[string]any{
+		"battlefield":  a.summaryBattlefield(ctx),
+		"events":       eventLines,
+		"final_event":  summarizeCombatEventPtr(finalEvent),
+		"combat_ended": a.ended,
+	})
+	if err != nil {
+		a.logger.Warn("Failed to marshal combat summary payload", zap.Error(err))
+		return fallback
+	}
+
+	resp, err := a.llmClient.Complete(ctx, &llm.CompletionRequest{
+		Messages: []llm.Message{
+			llm.NewSystemMessage("你是D&D战斗记录员。只根据输入JSON中的事实，用简短中文条目生成战后摘要，必须以“[战斗摘要]”开头，不得编造奖励、掉落、经验或任务进展。"),
+			llm.NewUserMessage(string(payload)),
+		},
+		Temperature: 0.2,
+		MaxTokens:   500,
+	})
+	if err != nil || strings.TrimSpace(resp.Content) == "" {
+		if err != nil {
+			a.logger.Warn("Combat summary generation failed; using fallback", zap.Error(err))
+		}
+		return fallback
+	}
+
+	summary := strings.TrimSpace(resp.Content)
+	if !strings.HasPrefix(summary, "[战斗摘要]") {
+		summary = "[战斗摘要]\n" + summary
+	}
+	return summary
+}
+
+func (a *CombatDMAgent) fallbackCombatSummary(finalEvent *combatActionEvent) string {
+	var sb strings.Builder
+	sb.WriteString("[战斗摘要]\n")
+	if finalEvent != nil {
+		if finalEvent.ExecuteResult != nil && finalEvent.ExecuteResult.CombatEnd != nil {
+			sb.WriteString(fmt.Sprintf("- 战斗结束：%s，胜利方：%s。\n", finalEvent.ExecuteResult.CombatEnd.Reason, finalEvent.ExecuteResult.CombatEnd.Winners))
+		} else if finalEvent.NextTurnResult != nil && finalEvent.NextTurnResult.Turn != nil && finalEvent.NextTurnResult.Turn.CombatEnd != nil {
+			end := finalEvent.NextTurnResult.Turn.CombatEnd
+			sb.WriteString(fmt.Sprintf("- 战斗结束：%s，胜利方：%s。\n", end.Reason, end.Winners))
+		}
+	}
+	if len(a.events) == 0 {
+		sb.WriteString("- 战斗已结束，具体过程记录不足。\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("- 战斗共记录 %d 个关键事件。\n", len(a.events)))
+		limit := len(a.events)
+		if limit > 6 {
+			limit = 6
+			sb.WriteString("- 以下为最后 6 个关键事件：\n")
+		}
+		start := len(a.events) - limit
+		for _, event := range a.events[start:] {
+			line := summarizeCombatEvent(event)
+			if line != "" {
+				sb.WriteString("- " + line + "\n")
+			}
+		}
+	}
+	sb.WriteString("- 后续叙事可从战场检查、伤势处理、战利品确认或继续探索展开。")
+	return strings.TrimSpace(sb.String())
+}
+
+func (a *CombatDMAgent) summaryBattlefield(ctx context.Context) string {
+	summary, err := a.dndEngine.GetStateSummary(ctx, a.gameID)
+	if err == nil && summary.ActiveCombat != nil {
+		return a.formatBattlefieldSummary(ctx)
+	}
+
+	eventLines := make([]string, 0, len(a.events))
+	for _, event := range a.events {
+		line := summarizeCombatEvent(event)
+		if line != "" {
+			eventLines = append(eventLines, line)
+		}
+	}
+	if len(eventLines) == 0 {
+		return "战斗已结束；没有可用的活跃战场快照。"
+	}
+	return "战斗已结束；活跃战场快照已关闭，以下为缓存事件：\n" + strings.Join(eventLines, "\n")
+}
+
+func (a *CombatDMAgent) endCombatInEngine(ctx context.Context) {
+	if err := a.dndEngine.EndCombat(ctx, dndengine.EndCombatRequest{GameID: a.gameID}); err != nil {
+		a.logger.Warn("Failed to end combat in dnd-core; phase may already be exploration",
+			zap.String("gameID", string(a.gameID)),
+			zap.Error(err),
+		)
+	}
+}
+
+func summarizeCombatEventPtr(event *combatActionEvent) string {
+	if event == nil {
+		return ""
+	}
+	return summarizeCombatEvent(*event)
+}
+
+func summarizeCombatEvent(event combatActionEvent) string {
+	actorName := event.ActorName
+	if actorName == "" {
+		actorName = "未知角色"
+	}
+	var parts []string
+	if event.ExecuteResult != nil {
+		if event.ExecuteResult.ActionName != "" {
+			parts = append(parts, fmt.Sprintf("%s执行%s", actorName, event.ExecuteResult.ActionName))
+		}
+		if event.ExecuteResult.Narrative != "" {
+			parts = append(parts, event.ExecuteResult.Narrative)
+		}
+		if event.ExecuteResult.CombatEnd != nil {
+			parts = append(parts, fmt.Sprintf("战斗结束:%s/%s", event.ExecuteResult.CombatEnd.Reason, event.ExecuteResult.CombatEnd.Winners))
+		}
+	}
+	if event.NextTurnResult != nil && event.NextTurnResult.Turn != nil {
+		if event.NextTurnResult.Turn.CombatEnd != nil {
+			end := event.NextTurnResult.Turn.CombatEnd
+			parts = append(parts, fmt.Sprintf("战斗结束:%s/%s", end.Reason, end.Winners))
+		} else if event.NextTurnResult.Turn.ActorName != "" {
+			parts = append(parts, fmt.Sprintf("下一回合:%s", event.NextTurnResult.Turn.ActorName))
+		}
+	}
+	if len(parts) == 0 && event.Message != "" {
+		parts = append(parts, event.Message)
+	}
+	return strings.TrimSpace(strings.Join(parts, "；"))
 }
 
 // ============================================================================

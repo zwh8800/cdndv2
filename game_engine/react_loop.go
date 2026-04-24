@@ -116,6 +116,19 @@ func (l *ReActLoop) SetLogger(log *zap.Logger) {
 	}
 }
 
+// SetLLMClient 设置 LLM 客户端，并同步到主 Agent 与子 Agent。
+func (l *ReActLoop) SetLLMClient(client llm.LLMClient) {
+	l.llm = client
+	if setter, ok := l.mainAgent.(interface{ SetLLMClient(llm.LLMClient) }); ok {
+		setter.SetLLMClient(client)
+	}
+	for _, subAgent := range l.agents {
+		if setter, ok := subAgent.(interface{ SetLLMClient(llm.LLMClient) }); ok {
+			setter.SetLLMClient(client)
+		}
+	}
+}
+
 // SetCompressor 设置上下文压缩器
 func (l *ReActLoop) SetCompressor(compressor *llm.ContextCompressor) {
 	if compressor != nil {
@@ -779,9 +792,9 @@ const subAgentMaxIterations = 5
 
 // CombatPlan 战斗计划（Plan-Then-Act 模式）
 type CombatPlan struct {
-	PlanType     string          `json:"plan_type"` // full_round, partial, single_action
-	Actions      []CombatPlanAction `json:"actions"`
-	Contingency string          `json:"contingency,omitempty"`
+	PlanType    string             `json:"plan_type"` // full_round, partial, single_action
+	Actions     []CombatPlanAction `json:"actions"`
+	Contingency string             `json:"contingency,omitempty"`
 }
 
 // CombatPlanAction 战斗计划中的单个动作

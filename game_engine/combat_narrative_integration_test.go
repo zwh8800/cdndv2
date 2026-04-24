@@ -11,10 +11,11 @@ import (
 )
 
 type fakeCombatNarrativeLLM struct {
-	gameID  model.ID
-	sceneID model.ID
-	pcID    model.ID
-	enemyID model.ID
+	gameID              model.ID
+	sceneID             model.ID
+	pcID                model.ID
+	enemyID             model.ID
+	omitPCInCombatStart bool
 }
 
 func (f *fakeCombatNarrativeLLM) Complete(ctx context.Context, req *llm.CompletionRequest) (*llm.CompletionResponse, error) {
@@ -53,6 +54,10 @@ func (f *fakeCombatNarrativeLLM) Complete(ctx context.Context, req *llm.Completi
 		if hasToolMessage(req.Messages) {
 			return textResponse("战斗初始化完成，交由独立战斗会话处理。"), nil
 		}
+		participantIDs := []any{string(f.pcID), string(f.enemyID)}
+		if f.omitPCInCombatStart {
+			participantIDs = []any{string(f.enemyID)}
+		}
 		return &llm.CompletionResponse{
 			ToolCalls: []llm.ToolCall{
 				{
@@ -61,7 +66,7 @@ func (f *fakeCombatNarrativeLLM) Complete(ctx context.Context, req *llm.Completi
 					Arguments: map[string]any{
 						"game_id":         string(f.gameID),
 						"scene_id":        string(f.sceneID),
-						"participant_ids": []any{string(f.pcID), string(f.enemyID)},
+						"participant_ids": participantIDs,
 					},
 				},
 			},
@@ -249,6 +254,30 @@ func TestProcessInputStartsCombatSessionAfterNarrativeTrigger(t *testing.T) {
 	}
 }
 
+func TestCombatStartAutoIncludesPCWhenLLMOmitsParticipant(t *testing.T) {
+	ctx := context.Background()
+	ge, fake := newFakeCombatNarrativeEngine(t)
+	defer ge.Close()
+	fake.omitPCInCombatStart = true
+	session := prepareCombatNarrativeFixture(t, ctx, ge, fake)
+
+	_, err := ge.ProcessInput(ctx, session, "我发现一只哥布林，拔出武器准备战斗")
+	if err != nil {
+		t.Fatalf("ProcessInput failed: %v", err)
+	}
+
+	combat, err := ge.dndEngine.GetCurrentCombat(ctx, engine.GetCurrentCombatRequest{GameID: session.ID})
+	if err != nil {
+		t.Fatalf("GetCurrentCombat failed: %v", err)
+	}
+	if !combatIncludesActor(combat.Combat.Initiative, fake.pcID) {
+		t.Fatalf("expected combat initiative to include PC %s, got %+v", fake.pcID, combat.Combat.Initiative)
+	}
+	if !combatIncludesActor(combat.Combat.Initiative, fake.enemyID) {
+		t.Fatalf("expected combat initiative to include enemy %s, got %+v", fake.enemyID, combat.Combat.Initiative)
+	}
+}
+
 func TestCombatEndInjectsSummaryAndReturnsToExploration(t *testing.T) {
 	ctx := context.Background()
 	ge, fake := newFakeCombatNarrativeEngine(t)
@@ -330,6 +359,15 @@ func TestNarrativeContinuesAfterCombatEnd(t *testing.T) {
 func historyContains(history []llm.Message, needle string) bool {
 	for _, msg := range history {
 		if strings.Contains(msg.Content, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func combatIncludesActor(entries []engine.CombatantEntryInfo, actorID model.ID) bool {
+	for _, entry := range entries {
+		if entry.ActorID == actorID {
 			return true
 		}
 	}

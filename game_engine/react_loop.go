@@ -1310,7 +1310,7 @@ func (l *ReActLoop) resolveSingleCallNames(ctx context.Context, call llm.ToolCal
 	}
 	// 解析 scene_id
 	if val, ok := call.Arguments["scene_id"].(string); ok && val != "" {
-		if resolved := l.resolveSceneName(ctx, val); resolved != "" {
+		if resolved := l.resolveSceneName(ctx, val, shouldFallbackToCurrentScene(call.Name)); resolved != "" {
 			call.Arguments["scene_id"] = resolved
 		}
 	}
@@ -1352,11 +1352,7 @@ func (l *ReActLoop) resolveActorName(ctx context.Context, nameOrID string) strin
 }
 
 // resolveSceneName 将场景名称解析为 scene_id
-func (l *ReActLoop) resolveSceneName(ctx context.Context, nameOrID string) string {
-	if strings.HasPrefix(nameOrID, "01") || strings.HasPrefix(nameOrID, "scene_") {
-		return nameOrID
-	}
-
+func (l *ReActLoop) resolveSceneName(ctx context.Context, nameOrID string, fallbackToCurrent bool) string {
 	result, err := l.engine.ListScenes(ctx, engine.ListScenesRequest{
 		GameID: l.state.GameID,
 	})
@@ -1365,12 +1361,44 @@ func (l *ReActLoop) resolveSceneName(ctx context.Context, nameOrID string) strin
 	}
 
 	for _, scene := range result.Scenes {
-		if strings.EqualFold(scene.Name, nameOrID) {
+		if strings.EqualFold(string(scene.ID), nameOrID) || strings.EqualFold(scene.Name, nameOrID) {
 			return string(scene.ID)
 		}
 	}
 
+	if fallbackToCurrent {
+		if sceneID, ok := l.currentSceneID(ctx); ok {
+			return sceneID
+		}
+	}
+
 	return nameOrID
+}
+
+func shouldFallbackToCurrentScene(toolName string) bool {
+	switch toolName {
+	case "get_scene", "get_scene_actors", "get_scene_items", "show_scene_detail":
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *ReActLoop) currentSceneID(ctx context.Context) (string, bool) {
+	if l.state.agentContext != nil {
+		if sceneID := l.state.agentContext.KnownEntityIDs["scene_id"]; sceneID != "" {
+			return sceneID, true
+		}
+	}
+
+	result, err := l.engine.GetCurrentScene(ctx, engine.GetCurrentSceneRequest{
+		GameID: l.state.GameID,
+	})
+	if err != nil || result == nil || result.ID == "" {
+		return "", false
+	}
+
+	return string(result.ID), true
 }
 
 // GetHistory 获取对话历史

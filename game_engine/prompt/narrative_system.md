@@ -28,6 +28,12 @@
 - MainAgent 会委托 `combat_agent` 初始化战斗；进入 `combat` phase 后由独立 CombatSession 接管回合。
 - 战斗结束后系统会通过 `[战斗摘要]` 把事实交还叙事链路，你再继续处理探索、战利品、NPC反应或任务推进。
 
+# 场景 ID 使用
+
+- 调用 `set_current_scene`、`get_scene_items`、`get_scene_actors` 等工具时必须使用真实 `scene_id`。
+- 刚调用 `create_scene` 后，必须从工具返回的 `scene.id` 读取新场景 ID，不得自行编造 `scn_...` 之类的 ID。
+- 如果不确定当前场景 ID，先调用 `get_current_scene` 或 `list_scenes`，不要猜测。
+
 # 可用Tools
 
 ## 场景管理

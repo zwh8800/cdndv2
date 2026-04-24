@@ -65,6 +65,7 @@ func (t *StartCombatTool) Execute(ctx context.Context, params map[string]any) (*
 	for i, pid := range participantStrs {
 		pids[i] = model.ID(pid)
 	}
+	pids, autoAddedPCs := appendLivingPCs(ctx, e, gameID, sceneID, pids)
 
 	req := engine.StartCombatRequest{
 		GameID:         gameID,
@@ -83,7 +84,7 @@ func (t *StartCombatTool) Execute(ctx context.Context, params map[string]any) (*
 	return &ToolResult{
 		Success: true,
 		Data:    result.Combat,
-		Message: "战斗开始！先攻顺序已确定",
+		Message: startCombatMessage("战斗开始！先攻顺序已确定", autoAddedPCs),
 	}, nil
 }
 
@@ -157,6 +158,7 @@ func (t *StartCombatWithSurpriseTool) Execute(ctx context.Context, params map[st
 	for i, id := range observerStrs {
 		observers[i] = model.ID(id)
 	}
+	observers, autoAddedPCs := appendLivingPCsExcept(ctx, e, gameID, sceneID, observers, stealthy)
 
 	req := engine.StartCombatWithSurpriseRequest{
 		GameID:       gameID,
@@ -176,8 +178,61 @@ func (t *StartCombatWithSurpriseTool) Execute(ctx context.Context, params map[st
 	return &ToolResult{
 		Success: true,
 		Data:    result.Combat,
-		Message: "突袭战斗开始！潜行方获得突袭优势",
+		Message: startCombatMessage("突袭战斗开始！潜行方获得突袭优势", autoAddedPCs),
 	}, nil
+}
+
+func appendLivingPCs(ctx context.Context, e *engine.Engine, gameID model.ID, sceneID model.ID, participantIDs []model.ID) ([]model.ID, []model.ID) {
+	return appendLivingPCsExcept(ctx, e, gameID, sceneID, participantIDs, nil)
+}
+
+func appendLivingPCsExcept(ctx context.Context, e *engine.Engine, gameID model.ID, sceneID model.ID, participantIDs []model.ID, excluded []model.ID) ([]model.ID, []model.ID) {
+	seen := make(map[model.ID]bool, len(participantIDs)+len(excluded))
+	for _, id := range participantIDs {
+		seen[id] = true
+	}
+	for _, id := range excluded {
+		seen[id] = true
+	}
+
+	alive := true
+	result, err := listLivingPCs(ctx, e, gameID, &sceneID, &alive)
+	if err == nil && result != nil && len(result.Actors) == 0 {
+		result, err = listLivingPCs(ctx, e, gameID, nil, &alive)
+	}
+	if err != nil || result == nil {
+		return participantIDs, nil
+	}
+
+	added := make([]model.ID, 0)
+	for _, actor := range result.Actors {
+		if seen[actor.ID] {
+			continue
+		}
+		participantIDs = append(participantIDs, actor.ID)
+		seen[actor.ID] = true
+		added = append(added, actor.ID)
+	}
+
+	return participantIDs, added
+}
+
+func listLivingPCs(ctx context.Context, e *engine.Engine, gameID model.ID, sceneID *model.ID, alive *bool) (*engine.ListActorsResult, error) {
+	return e.ListActors(ctx, engine.ListActorsRequest{
+		GameID: gameID,
+		Filter: &engine.ActorFilter{
+			Types:   []model.ActorType{model.ActorTypePC},
+			SceneID: sceneID,
+			Alive:   alive,
+		},
+	})
+}
+
+func startCombatMessage(base string, autoAddedPCs []model.ID) string {
+	if len(autoAddedPCs) == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s；系统已自动补齐玩家角色参战者: %v", base, autoAddedPCs)
 }
 
 // GetCurrentCombatTool 获取当前战斗状态
@@ -984,13 +1039,13 @@ Returns: Complete attack result including attack roll, whether hit, damage dealt
 				// In composite schema we get target_id from name resolution
 				// For now, we assume the registry will handle name resolution upstream
 				out := map[string]any{
-					"game_id":      params["game_id"],
-					"attacker_id":  params["attacker_id"],
-					"target_id":    params["target_id"], // will be resolved by upstream name resolver
-					"attack_type":  params["attack_type"],
-					"is_unarmed":   params["is_unarmed"],
-					"is_off_hand":  params["is_off_hand"],
-					"advantage":     params["advantage"],
+					"game_id":     params["game_id"],
+					"attacker_id": params["attacker_id"],
+					"target_id":   params["target_id"], // will be resolved by upstream name resolver
+					"attack_type": params["attack_type"],
+					"is_unarmed":  params["is_unarmed"],
+					"is_off_hand": params["is_off_hand"],
+					"advantage":   params["advantage"],
 				}
 				if wn, ok := params["weapon_name"]; ok {
 					out["weapon_name"] = wn
@@ -1073,7 +1128,7 @@ Returns: Full combat status with initiative order and current turn.`
 			Params: func(ctx context.Context, params map[string]any, prevResults map[string]*ToolResult) map[string]any {
 				if hasSurprise, ok := params["has_surprise"].(bool); ok && hasSurprise {
 					return map[string]any{
-						"game_id":        params["game_id"],
+						"game_id":       params["game_id"],
 						"scene_id":      params["scene_id"],
 						"stealthy_side": params["stealthy_side"],
 						"observers":     params["observers"],
@@ -1251,4 +1306,3 @@ Returns: Complete combat snapshot with all participants, HP, initiative, current
 		true, // read only
 	)
 }
-

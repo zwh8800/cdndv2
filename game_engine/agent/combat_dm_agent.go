@@ -136,6 +136,9 @@ func (a *CombatDMAgent) RunLoop(ctx context.Context, input string) (*CombatAgent
 
 		allResponses = append(allResponses, response)
 
+		// 强制刷新战斗状态，防御大模型跳过工具调用直接返回结束文本的情况
+		a.refreshTurnState(ctx)
+
 		// 战斗结束
 		if a.ended {
 			return &CombatAgentResult{

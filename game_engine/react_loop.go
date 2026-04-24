@@ -876,8 +876,10 @@ func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubA
 						}
 
 						// 解析名称为ID并执行
-						l.resolveToolNames(ctx, []llm.ToolCall{tc})
-						results := l.tools.ExecuteTools(ctx, []llm.ToolCall{tc})
+						toolCalls := []llm.ToolCall{tc}
+						l.resolveToolNames(ctx, toolCalls)
+						tc = toolCalls[0]
+						results := l.tools.ExecuteToolsForAgent(ctx, call.AgentName, toolCalls)
 
 						// 添加到子会话历史
 						subCtx.History = append(subCtx.History, llm.NewAssistantMessage("", []llm.ToolCall{tc}))
@@ -947,7 +949,7 @@ func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubA
 
 		// 解析名称为ID并执行工具
 		l.resolveToolNames(ctx, resp.ToolCalls)
-		toolResults := l.tools.ExecuteTools(ctx, resp.ToolCalls)
+		toolResults := l.tools.ExecuteToolsForAgent(ctx, call.AgentName, resp.ToolCalls)
 		for _, tr := range toolResults {
 			subCtx.History = append(subCtx.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
 			log.Debug("SubAgent tool result",
@@ -1124,21 +1126,62 @@ func extractEntityIDsFromResult(result *agent.AgentCallResult) map[string]string
 // extractJSONFromString 从字符串中提取 JSON 对象
 func extractJSONFromString(s string) string {
 	start := -1
-	for i, c := range s {
-		if c == '{' {
+	inString := false
+	escaped := false
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
 			start = i
-			break
+			goto foundStart
 		}
 	}
+foundStart:
 	if start == -1 {
 		return ""
 	}
 
 	depth := 0
+	inString = false
+	escaped = false
 	for i := start; i < len(s); i++ {
-		if s[i] == '{' {
+		ch := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
 			depth++
-		} else if s[i] == '}' {
+		case '}':
 			depth--
 			if depth == 0 {
 				return s[start : i+1]
@@ -1265,21 +1308,24 @@ func joinStrings(strs []string, sep string) string {
 func (l *ReActLoop) executeTools(ctx context.Context, calls []llm.ToolCall) []llm.ToolResult {
 	// 在执行前解析工具参数中的名称为ID
 	l.resolveToolNames(ctx, calls)
-	return l.tools.ExecuteTools(ctx, calls)
+	return l.tools.ExecuteToolsForAgent(ctx, agent.MainAgentName, calls)
 }
 
 // resolveToolNames 解析工具调用参数中的名称为实体ID
 // 当 LLM 使用角色名或场景名而非 ID 时，自动查找并替换为正确的 ID
 func (l *ReActLoop) resolveToolNames(ctx context.Context, calls []llm.ToolCall) {
 	log := l.getLogger()
-	for _, call := range calls {
-		l.resolveSingleCallNames(ctx, call)
+	for i := range calls {
+		l.resolveSingleCallNames(ctx, &calls[i])
 	}
 	_ = log
 }
 
 // resolveSingleCallNames 解析单个工具调用的名称参数
-func (l *ReActLoop) resolveSingleCallNames(ctx context.Context, call llm.ToolCall) {
+func (l *ReActLoop) resolveSingleCallNames(ctx context.Context, call *llm.ToolCall) {
+	if call == nil {
+		return
+	}
 	if call.Arguments == nil {
 		return
 	}

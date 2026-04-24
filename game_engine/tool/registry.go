@@ -169,6 +169,16 @@ func (r *ToolRegistry) GetAgentsForTool(toolName string) []string {
 	return agents
 }
 
+// IsToolAllowedForAgent 判断指定 Agent 是否有权调用该工具。
+func (r *ToolRegistry) IsToolAllowedForAgent(agentName, toolName string) bool {
+	for _, name := range r.byAgent[agentName] {
+		if name == toolName {
+			return true
+		}
+	}
+	return false
+}
+
 // IsToolReadOnly 判断指定工具是否为只读工具
 // 实现 llm.ToolReadOnlyChecker 接口，供 ContextCompressor 使用
 // 返回 (是否只读, 是否找到该工具)
@@ -272,10 +282,20 @@ func (r *ToolRegistry) getPhaseSpecificTools(phase string) []string {
 
 // ExecuteTools 执行多个Tool调用
 func (r *ToolRegistry) ExecuteTools(ctx context.Context, calls []llm.ToolCall) []llm.ToolResult {
+	return r.executeTools(ctx, "", calls)
+}
+
+// ExecuteToolsForAgent 按 Agent 权限执行多个 Tool 调用。
+func (r *ToolRegistry) ExecuteToolsForAgent(ctx context.Context, agentName string, calls []llm.ToolCall) []llm.ToolResult {
+	return r.executeTools(ctx, agentName, calls)
+}
+
+func (r *ToolRegistry) executeTools(ctx context.Context, agentName string, calls []llm.ToolCall) []llm.ToolResult {
 	log := r.getLogger()
 
 	log.Debug("[ToolRegistry] ExecuteTools started",
 		zap.Int("callCount", len(calls)),
+		zap.String("agentName", agentName),
 	)
 
 	results := make([]llm.ToolResult, 0, len(calls))
@@ -288,6 +308,21 @@ func (r *ToolRegistry) ExecuteTools(ctx context.Context, calls []llm.ToolCall) [
 			zap.String("toolCallID", call.ID),
 			zap.String("arguments", truncateForLog(string(argsJSON), 200)),
 		)
+
+		if agentName != "" && !r.IsToolAllowedForAgent(agentName, call.Name) {
+			result := llm.ToolResult{
+				ToolCallID: call.ID,
+				Content:    "Error: tool not allowed for agent: " + agentName + " cannot call " + call.Name,
+				IsError:    true,
+			}
+			results = append(results, result)
+			log.Warn("[ToolRegistry] Tool call rejected by agent permission",
+				zap.String("agentName", agentName),
+				zap.String("toolName", call.Name),
+				zap.String("toolCallID", call.ID),
+			)
+			continue
+		}
 
 		result := r.executeTool(ctx, call)
 		results = append(results, result)

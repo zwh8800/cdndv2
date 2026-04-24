@@ -165,7 +165,7 @@ func (c *ContextCompressor) CalibrateWithActualUsage(estimatedTokens, actualProm
 	c.lastEstimatedTokens = estimatedTokens
 	// 指数移动平均更新校准系数
 	// 注意：这里用的 estimatedTokens 是已乘过旧 ratio 的值，需要还原为 raw
-	rawEstimated := c.estimateRawTokens(nil) // 不能直接用，需要用传入的值反推
+	rawEstimated := estimatedTokens
 	if c.calibrationRatio > 0 {
 		rawEstimated = int(float64(estimatedTokens) / c.calibrationRatio)
 	}

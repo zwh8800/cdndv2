@@ -617,7 +617,7 @@ func (a *CombatDMAgent) executeReActLoop(ctx context.Context) (string, error) {
 			a.history = append(a.history, llm.NewAssistantMessage(resp.Content, resp.ToolCalls))
 
 			// 执行所有工具调用
-			results := a.registry.ExecuteTools(ctx, resp.ToolCalls)
+			results := a.registry.ExecuteToolsForAgent(ctx, a.Name(), resp.ToolCalls)
 
 			// 记录工具结果到历史
 			for _, r := range results {
@@ -1020,10 +1020,21 @@ func (a *CombatDMAgent) trimHistoryIfNeeded() {
 		zap.Int("keepRecent", keepRecentMessages),
 	)
 
-	// 保留第一条（系统提示词）+ 最后 N 条
-	newHistory := make([]llm.Message, 0, 1+keepRecentMessages)
+	// 保留第一条（系统提示词）+ 最近消息，并避免从 tool 结果消息中间截断。
+	start := len(a.history) - keepRecentMessages
+	if start < 1 {
+		start = 1
+	}
+	for start > 1 && a.history[start].Role == llm.RoleTool {
+		start--
+		if a.history[start].Role == llm.RoleAssistant && len(a.history[start].ToolCalls) > 0 {
+			break
+		}
+	}
+
+	newHistory := make([]llm.Message, 0, 1+len(a.history[start:]))
 	newHistory = append(newHistory, a.history[0]) // system prompt
-	newHistory = append(newHistory, a.history[len(a.history)-keepRecentMessages:]...)
+	newHistory = append(newHistory, a.history[start:]...)
 	a.history = newHistory
 }
 
@@ -1172,10 +1183,65 @@ func extractJSONObject(content string) string {
 	if strings.HasPrefix(content, "{") && strings.HasSuffix(content, "}") {
 		return content
 	}
-	start := strings.Index(content, "{")
-	end := strings.LastIndex(content, "}")
-	if start >= 0 && end > start {
-		return content[start : end+1]
+
+	start := -1
+	inString := false
+	escaped := false
+	for i := 0; i < len(content); i++ {
+		ch := content[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			start = i
+			goto foundStart
+		}
+	}
+foundStart:
+	if start >= 0 {
+		depth := 0
+		inString = false
+		escaped = false
+		for i := start; i < len(content); i++ {
+			ch := content[i]
+			if inString {
+				if escaped {
+					escaped = false
+					continue
+				}
+				switch ch {
+				case '\\':
+					escaped = true
+				case '"':
+					inString = false
+				}
+				continue
+			}
+			switch ch {
+			case '"':
+				inString = true
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					return content[start : i+1]
+				}
+			}
+		}
 	}
 	return content
 }

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -25,6 +26,36 @@ const (
 type CombatAgentResult struct {
 	Response    string // 返回给玩家的叙述文本
 	CombatEnded bool   // 战斗是否结束
+}
+
+type combatIntentType string
+
+const (
+	combatIntentAction  combatIntentType = "action"
+	combatIntentEndTurn combatIntentType = "end_turn"
+	combatIntentInvalid combatIntentType = "invalid"
+)
+
+// ResolvedCombatIntent 是 LLM/启发式解析后的受控动作意图。
+type ResolvedCombatIntent struct {
+	IntentType combatIntentType `json:"intent_type"`
+	ActionID   string           `json:"action_id,omitempty"`
+	TargetID   model.ID         `json:"target_id,omitempty"`
+	TargetIDs  []model.ID       `json:"target_ids,omitempty"`
+	Confidence float64          `json:"confidence,omitempty"`
+	Reason     string           `json:"reason,omitempty"`
+}
+
+type combatActionEvent struct {
+	ActorID        model.ID
+	ActorName      string
+	ActorType      string
+	OriginalInput  string
+	Intent         ResolvedCombatIntent
+	ExecuteResult  *dndengine.ExecuteTurnActionResult
+	NextTurnResult *dndengine.NextTurnResult
+	CombatEnded    bool
+	Message        string
 }
 
 // turnStateCache 从 dnd-core 引擎查询的当前回合状态
@@ -103,89 +134,432 @@ func (a *CombatDMAgent) Initialize(ctx context.Context) (*CombatAgentResult, err
 		zap.String("gameID", string(a.gameID)),
 	)
 
-	// 构建系统提示词
-	systemPrompt := a.buildSystemPrompt()
-	a.history = append(a.history, llm.NewSystemMessage(systemPrompt))
+	a.history = append(a.history, llm.NewSystemMessage("你是D&D 5e战斗叙事助手。规则计算和回合推进由系统完成。"))
 
-	// 运行第一轮（无用户输入，LLM 应主动调用 next_turn_with_actions 获取初始状态）
 	return a.RunLoop(ctx, "")
 }
 
-// RunLoop 主运行循环（两层循环架构）
-//
-// 外层循环：Go 框架层回合路由
-//  1. 将 input 加入 history（如果非空）
-//  2. 运行内层 ReAct 循环 → LLM yield 出文本
-//  3. 检查：战斗结束？→ return
-//  4. 检查：当前是玩家回合？→ return（yield 给玩家）
-//  5. 当前是敌人回合 → 调用 EnemyAI → 将意图作为 UserMessage 加入 history → 回到步骤 2
+// RunLoop 主运行循环。Go 层负责所有回合推进和 dnd-core 调用；
+// LLM 只参与自然语言动作解析与叙事生成。
 func (a *CombatDMAgent) RunLoop(ctx context.Context, input string) (*CombatAgentResult, error) {
+	if a.ended {
+		return &CombatAgentResult{Response: "战斗已经结束。", CombatEnded: true}, nil
+	}
 	if input != "" {
 		a.history = append(a.history, llm.NewUserMessage(input))
 	}
 
 	var allResponses []string
-	enemyChainCount := 0
+	if err := a.refreshTurnState(ctx); err != nil {
+		return nil, err
+	}
+	if a.ended {
+		return &CombatAgentResult{Response: "战斗已经结束。", CombatEnded: true}, nil
+	}
 
-	for {
-		// 内层 ReAct 循环
-		response, err := a.executeReActLoop(ctx)
+	if a.isPlayerTurn() {
+		if input == "" {
+			return &CombatAgentResult{
+				Response:    a.describeCurrentTurn(ctx),
+				CombatEnded: false,
+			}, nil
+		}
+
+		event, err := a.processCurrentActorInput(ctx, input, true)
 		if err != nil {
-			return nil, fmt.Errorf("ReAct loop error: %w", err)
+			return nil, err
 		}
-
-		allResponses = append(allResponses, response)
-
-		// 强制刷新战斗状态，防御大模型跳过工具调用直接返回结束文本的情况
-		a.refreshTurnState(ctx)
-
-		// 战斗结束
-		if a.ended {
-			return &CombatAgentResult{
-				Response:    strings.Join(allResponses, "\n\n"),
-				CombatEnded: true,
-			}, nil
+		if event.Message != "" {
+			allResponses = append(allResponses, event.Message)
 		}
-
-		// 玩家回合 → yield
+		if event.CombatEnded {
+			return &CombatAgentResult{Response: strings.Join(allResponses, "\n\n"), CombatEnded: true}, nil
+		}
+		if err := a.refreshTurnState(ctx); err != nil {
+			return nil, err
+		}
 		if a.isPlayerTurn() {
-			return &CombatAgentResult{
-				Response:    strings.Join(allResponses, "\n\n"),
-				CombatEnded: false,
-			}, nil
+			return &CombatAgentResult{Response: strings.Join(allResponses, "\n\n"), CombatEnded: false}, nil
+		}
+	} else if input != "" {
+		allResponses = append(allResponses, "当前还没有轮到你行动，我会先处理当前行动者的回合。")
+	}
+
+	enemyResponses, ended, err := a.runUntilPlayerTurnOrCombatEnd(ctx)
+	if err != nil {
+		return nil, err
+	}
+	allResponses = append(allResponses, enemyResponses...)
+	if len(allResponses) == 0 {
+		allResponses = append(allResponses, a.describeCurrentTurn(ctx))
+	}
+	return &CombatAgentResult{
+		Response:    strings.Join(allResponses, "\n\n"),
+		CombatEnded: ended,
+	}, nil
+}
+
+func (a *CombatDMAgent) runUntilPlayerTurnOrCombatEnd(ctx context.Context) ([]string, bool, error) {
+	var responses []string
+
+	for chainCount := 0; chainCount < maxEnemyTurnChain; chainCount++ {
+		if err := a.refreshTurnState(ctx); err != nil {
+			return nil, false, err
+		}
+		if a.ended {
+			return responses, true, nil
+		}
+		if a.isPlayerTurn() {
+			if len(responses) == 0 {
+				responses = append(responses, a.describeCurrentTurn(ctx))
+			}
+			return responses, false, nil
 		}
 
-		// 敌人/NPC 回合 → 生成意图，喂回 LLM
-		enemyChainCount++
-		if enemyChainCount >= maxEnemyTurnChain {
-			a.logger.Warn("Max enemy turn chain reached, forcing yield",
-				zap.Int("chainCount", enemyChainCount),
-			)
-			return &CombatAgentResult{
-				Response:    strings.Join(allResponses, "\n\n"),
-				CombatEnded: false,
-			}, nil
+		if !hasProactiveActions(a.cachedActions) {
+			event, err := a.advanceTurn(ctx, "当前行动者没有可执行动作，自动结束回合。")
+			if err != nil {
+				return nil, false, err
+			}
+			if event.Message != "" {
+				responses = append(responses, event.Message)
+			}
+			if event.CombatEnded {
+				return responses, true, nil
+			}
+			continue
 		}
 
-		intent, err := a.generateEnemyIntent(ctx)
+		intentText, err := a.generateEnemyIntent(ctx)
 		if err != nil {
 			a.logger.Error("Failed to generate enemy intent", zap.Error(err))
-			intent = "发呆，不采取任何行动"
+			intentText = "采取最直接的攻击行动"
 		}
+		a.history = append(a.history, llm.NewUserMessage(fmt.Sprintf("[%s的行动] %s", a.turnState.ActorName, intentText)))
 
-		// 将敌人意图作为 UserMessage 注入历史
-		actorName := "未知角色"
-		if a.turnState != nil {
-			actorName = a.turnState.ActorName
+		event, err := a.processCurrentActorInput(ctx, intentText, false)
+		if err != nil {
+			return nil, false, err
 		}
-		intentMsg := fmt.Sprintf("[%s的行动] %s", actorName, intent)
-		a.history = append(a.history, llm.NewUserMessage(intentMsg))
-
-		a.logger.Info("Enemy intent injected",
-			zap.String("actor", actorName),
-			zap.String("intent", intent),
-		)
+		if event.Message != "" {
+			responses = append(responses, event.Message)
+		}
+		if event.CombatEnded {
+			return responses, true, nil
+		}
 	}
+
+	a.logger.Warn("Max enemy turn chain reached", zap.Int("chainCount", maxEnemyTurnChain))
+	responses = append(responses, "连续自动回合达到安全上限，战斗暂停等待你的下一步。")
+	return responses, false, nil
+}
+
+func (a *CombatDMAgent) processCurrentActorInput(ctx context.Context, input string, playerControlled bool) (*combatActionEvent, error) {
+	if err := a.refreshTurnState(ctx); err != nil {
+		return nil, err
+	}
+	if a.ended {
+		return &combatActionEvent{CombatEnded: true, Message: "战斗已经结束。"}, nil
+	}
+	if a.turnState == nil {
+		return &combatActionEvent{Message: "当前回合状态不可用。"}, nil
+	}
+
+	if isPureEndTurnInput(input) {
+		return a.advanceTurn(ctx, fmt.Sprintf("%s结束了回合。", a.turnState.ActorName))
+	}
+
+	intent, err := a.resolveIntent(ctx, input)
+	if err != nil {
+		a.logger.Warn("Combat intent resolver failed; using fallback",
+			zap.String("actor", a.turnState.ActorName),
+			zap.Error(err),
+		)
+		intent = a.fallbackIntent(input)
+	}
+
+	if intent.IntentType == combatIntentEndTurn {
+		return a.advanceTurn(ctx, fmt.Sprintf("%s结束了回合。", a.turnState.ActorName))
+	}
+	if intent.IntentType != combatIntentAction {
+		msg := a.invalidIntentMessage("无法从输入中匹配可执行动作。")
+		if !playerControlled {
+			return a.advanceTurn(ctx, fmt.Sprintf("%s犹豫了一下，没有采取有效动作。", a.turnState.ActorName))
+		}
+		return &combatActionEvent{Intent: intent, Message: msg}, nil
+	}
+
+	action, ok := findAvailableAction(a.cachedActions, intent.ActionID)
+	if !ok {
+		if !playerControlled {
+			intent = a.fallbackIntent(input)
+			action, ok = findAvailableAction(a.cachedActions, intent.ActionID)
+		}
+		if !ok {
+			msg := a.invalidIntentMessage(fmt.Sprintf("动作 %q 当前不可用。", intent.ActionID))
+			if !playerControlled {
+				return a.advanceTurn(ctx, fmt.Sprintf("%s没有找到可执行动作，回合结束。", a.turnState.ActorName))
+			}
+			return &combatActionEvent{Intent: intent, Message: msg}, nil
+		}
+	}
+
+	if action.RequiresTarget && intent.TargetID == "" && len(intent.TargetIDs) == 0 && len(action.ValidTargetIDs) > 0 {
+		intent.TargetID = action.ValidTargetIDs[0]
+	}
+	if err := validateIntentTarget(intent, action); err != nil {
+		if !playerControlled {
+			intent.TargetID = firstValidTarget(action)
+		}
+		if err := validateIntentTarget(intent, action); err != nil {
+			msg := a.invalidIntentMessage(err.Error())
+			if !playerControlled {
+				return a.advanceTurn(ctx, fmt.Sprintf("%s无法选择有效目标，回合结束。", a.turnState.ActorName))
+			}
+			return &combatActionEvent{Intent: intent, Message: msg}, nil
+		}
+	}
+
+	req := dndengine.ExecuteTurnActionRequest{
+		GameID:    a.gameID,
+		ActorID:   a.turnState.ActorID,
+		ActionID:  intent.ActionID,
+		TargetID:  intent.TargetID,
+		TargetIDs: intent.TargetIDs,
+	}
+	execResult, err := a.dndEngine.ExecuteTurnAction(ctx, req)
+	if err != nil {
+		if !playerControlled {
+			a.logger.Warn("Enemy action execution failed; advancing turn", zap.Error(err))
+			return a.advanceTurn(ctx, fmt.Sprintf("%s的行动失败，回合结束。", a.turnState.ActorName))
+		}
+		return &combatActionEvent{
+			ActorID:       a.turnState.ActorID,
+			ActorName:     a.turnState.ActorName,
+			ActorType:     a.turnState.ActorType,
+			OriginalInput: input,
+			Intent:        intent,
+			Message:       a.invalidIntentMessage(err.Error()),
+		}, nil
+	}
+
+	event := combatActionEvent{
+		ActorID:       a.turnState.ActorID,
+		ActorName:     a.turnState.ActorName,
+		ActorType:     a.turnState.ActorType,
+		OriginalInput: input,
+		Intent:        intent,
+		ExecuteResult: execResult,
+		CombatEnded:   execResult.CombatEnd != nil,
+	}
+
+	shouldAdvance := execResult.CombatEnd == nil && (execResult.TurnComplete || containsEndTurnHint(input) || !playerControlled)
+	if shouldAdvance {
+		next, err := a.dndEngine.NextTurnWithActions(ctx, dndengine.NextTurnRequest{GameID: a.gameID})
+		if err != nil {
+			return nil, err
+		}
+		event.NextTurnResult = next
+		if next.Turn != nil && next.Turn.CombatEnd != nil {
+			event.CombatEnded = true
+		}
+	}
+	if event.CombatEnded {
+		a.ended = true
+	}
+
+	event.Message = a.narrateEvent(ctx, event)
+	a.history = append(a.history, llm.NewAssistantMessage(event.Message, nil))
+	a.trimHistoryIfNeeded()
+	return &event, nil
+}
+
+func (a *CombatDMAgent) advanceTurn(ctx context.Context, fallbackMessage string) (*combatActionEvent, error) {
+	actorID, actorName, actorType := model.ID(""), "未知角色", ""
+	if a.turnState != nil {
+		actorID, actorName, actorType = a.turnState.ActorID, a.turnState.ActorName, a.turnState.ActorType
+	}
+	next, err := a.dndEngine.NextTurnWithActions(ctx, dndengine.NextTurnRequest{GameID: a.gameID})
+	if err != nil {
+		return nil, err
+	}
+	event := combatActionEvent{
+		ActorID:        actorID,
+		ActorName:      actorName,
+		ActorType:      actorType,
+		Intent:         ResolvedCombatIntent{IntentType: combatIntentEndTurn, Confidence: 1},
+		NextTurnResult: next,
+		Message:        fallbackMessage,
+	}
+	if next.Turn != nil && next.Turn.CombatEnd != nil {
+		event.CombatEnded = true
+		a.ended = true
+	}
+	if event.CombatEnded {
+		event.Message = a.narrateEvent(ctx, event)
+	}
+	a.history = append(a.history, llm.NewAssistantMessage(event.Message, nil))
+	return &event, nil
+}
+
+func (a *CombatDMAgent) resolveIntent(ctx context.Context, input string) (ResolvedCombatIntent, error) {
+	if isPureEndTurnInput(input) {
+		return ResolvedCombatIntent{IntentType: combatIntentEndTurn, Confidence: 1}, nil
+	}
+	if a.llmClient == nil {
+		return a.fallbackIntent(input), nil
+	}
+
+	payload := map[string]any{
+		"actor":       a.turnState,
+		"input":       input,
+		"battlefield": a.formatBattlefieldSummary(ctx),
+		"actions":     actionSummaries(a.cachedActions),
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		a.logger.Warn("Failed to marshal combat intent payload", zap.Error(err))
+		return a.fallbackIntent(input), nil
+	}
+	resp, err := a.llmClient.Complete(ctx, &llm.CompletionRequest{
+		Messages: []llm.Message{
+			llm.NewSystemMessage(`你是D&D战斗动作解析器。只输出JSON，不要叙事。JSON格式: {"intent_type":"action|end_turn|invalid","action_id":"...","target_id":"...","target_ids":["..."],"confidence":0.0,"reason":"..."}。只能选择输入actions中存在的action_id和valid_target_ids。`),
+			llm.NewUserMessage(string(payloadJSON)),
+		},
+		Temperature: 0,
+		MaxTokens:   300,
+	})
+	if err != nil {
+		return ResolvedCombatIntent{}, err
+	}
+
+	var intent ResolvedCombatIntent
+	if err := json.Unmarshal([]byte(extractJSONObject(resp.Content)), &intent); err != nil {
+		return ResolvedCombatIntent{}, err
+	}
+	if intent.IntentType == "" {
+		intent.IntentType = combatIntentInvalid
+	}
+	return intent, nil
+}
+
+func (a *CombatDMAgent) fallbackIntent(input string) ResolvedCombatIntent {
+	if isPureEndTurnInput(input) {
+		return ResolvedCombatIntent{IntentType: combatIntentEndTurn, Confidence: 1}
+	}
+	if a.cachedActions == nil {
+		return ResolvedCombatIntent{IntentType: combatIntentInvalid, Reason: "no available actions"}
+	}
+
+	lower := strings.ToLower(input)
+	for _, action := range proactiveActions(a.cachedActions) {
+		if strings.Contains(lower, strings.ToLower(action.ID)) || strings.Contains(input, action.Name) {
+			return intentFromAction(action, 0.8, "matched action text")
+		}
+	}
+	for _, action := range proactiveActions(a.cachedActions) {
+		if action.Category == "attack" || strings.Contains(action.ID, "attack") || strings.Contains(action.Name, "攻击") {
+			return intentFromAction(action, 0.5, "fallback attack")
+		}
+	}
+	actions := proactiveActions(a.cachedActions)
+	if len(actions) > 0 {
+		return intentFromAction(actions[0], 0.3, "fallback first action")
+	}
+	return ResolvedCombatIntent{IntentType: combatIntentInvalid, Reason: "no proactive actions"}
+}
+
+func intentFromAction(action dndengine.AvailableAction, confidence float64, reason string) ResolvedCombatIntent {
+	intent := ResolvedCombatIntent{
+		IntentType: combatIntentAction,
+		ActionID:   action.ID,
+		Confidence: confidence,
+		Reason:     reason,
+	}
+	if action.RequiresTarget && len(action.ValidTargetIDs) > 0 {
+		intent.TargetID = action.ValidTargetIDs[0]
+	}
+	return intent
+}
+
+func (a *CombatDMAgent) narrateEvent(ctx context.Context, event combatActionEvent) string {
+	fallback := fallbackNarrative(event)
+	if a.llmClient == nil {
+		return fallback
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"actor_name":       event.ActorName,
+		"actor_type":       event.ActorType,
+		"original_input":   event.OriginalInput,
+		"intent":           event.Intent,
+		"execute_result":   event.ExecuteResult,
+		"next_turn_result": event.NextTurnResult,
+		"combat_ended":     event.CombatEnded,
+		"battlefield":      a.formatBattlefieldSummary(ctx),
+	})
+	if err != nil {
+		a.logger.Warn("Failed to marshal combat narration payload", zap.Error(err))
+		return fallback
+	}
+	resp, err := a.llmClient.Complete(ctx, &llm.CompletionRequest{
+		Messages: []llm.Message{
+			llm.NewSystemMessage("你是D&D战斗叙事助手。只能根据输入JSON中的事实写2-4句中文叙事，不得自行计算或编造骰点、伤害、HP。"),
+			llm.NewUserMessage(string(payload)),
+		},
+		Temperature: 0.7,
+		MaxTokens:   500,
+	})
+	if err != nil || strings.TrimSpace(resp.Content) == "" {
+		if err != nil {
+			a.logger.Warn("Combat narration failed; using fallback", zap.Error(err))
+		}
+		return fallback
+	}
+	return strings.TrimSpace(resp.Content)
+}
+
+func fallbackNarrative(event combatActionEvent) string {
+	var parts []string
+	if event.ExecuteResult != nil {
+		if event.ExecuteResult.Narrative != "" {
+			parts = append(parts, event.ExecuteResult.Narrative)
+		} else if event.ExecuteResult.ActionName != "" {
+			parts = append(parts, fmt.Sprintf("%s执行了%s。", event.ActorName, event.ExecuteResult.ActionName))
+		}
+	}
+	if event.NextTurnResult != nil && event.NextTurnResult.Turn != nil {
+		if event.NextTurnResult.Turn.CombatEnd != nil {
+			parts = append(parts, fmt.Sprintf("战斗结束：%s。", event.NextTurnResult.Turn.CombatEnd.Reason))
+		} else {
+			parts = append(parts, fmt.Sprintf("现在轮到%s行动。", event.NextTurnResult.Turn.ActorName))
+		}
+	}
+	if len(parts) == 0 && event.Message != "" {
+		parts = append(parts, event.Message)
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "战斗继续。")
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (a *CombatDMAgent) describeCurrentTurn(ctx context.Context) string {
+	if err := a.refreshTurnState(ctx); err != nil {
+		a.logger.Warn("Failed to refresh turn state for current turn description", zap.Error(err))
+		return "战斗状态暂时不可用。"
+	}
+	if a.ended {
+		return "战斗已经结束。"
+	}
+	if a.turnState == nil {
+		return "战斗进行中，但当前回合信息不可用。"
+	}
+	return fmt.Sprintf("%s\n当前轮到%s行动。\n%s", a.formatBattlefieldSummary(ctx), a.turnState.ActorName, a.formatAvailableActions())
+}
+
+func (a *CombatDMAgent) invalidIntentMessage(reason string) string {
+	return fmt.Sprintf("%s\n当前可用动作：\n%s", reason, a.formatAvailableActions())
 }
 
 // ============================================================================
@@ -225,7 +599,9 @@ func (a *CombatDMAgent) executeReActLoop(ctx context.Context) (string, error) {
 			}
 
 			// 从 dnd-core 引擎直接查询回合状态
-			a.refreshTurnState(ctx)
+			if err := a.refreshTurnState(ctx); err != nil {
+				return "", err
+			}
 
 			// 历史过长时截断
 			a.trimHistoryIfNeeded()
@@ -257,7 +633,7 @@ func (a *CombatDMAgent) executeReActLoop(ctx context.Context) (string, error) {
 
 // refreshTurnState 从 dnd-core 引擎直接查询当前回合状态
 // 在每次工具执行后调用，替代从工具结果 JSON 中解析
-func (a *CombatDMAgent) refreshTurnState(ctx context.Context) {
+func (a *CombatDMAgent) refreshTurnState(ctx context.Context) error {
 	// 1. 查询当前战斗状态
 	combatResult, err := a.dndEngine.GetCurrentCombat(ctx, dndengine.GetCurrentCombatRequest{
 		GameID: a.gameID,
@@ -266,21 +642,21 @@ func (a *CombatDMAgent) refreshTurnState(ctx context.Context) {
 		// 战斗不活跃（可能已结束）
 		a.ended = true
 		a.logger.Info("Combat ended (GetCurrentCombat returned error)", zap.Error(err))
-		return
+		return err
 	}
 	if combatResult.Combat.Status != model.CombatStatusActive {
 		a.ended = true
 		a.logger.Info("Combat ended (status not active)",
 			zap.String("status", string(combatResult.Combat.Status)),
 		)
-		return
+		return nil
 	}
 
 	// 2. 获取当前行动者 ID
 	currentTurn := combatResult.Combat.CurrentTurn
 	if currentTurn == nil {
 		a.logger.Warn("Combat active but CurrentTurn is nil")
-		return
+		return fmt.Errorf("combat active but current turn is nil")
 	}
 
 	// 3. 查询当前角色的可用动作（同时获取 ActorType）
@@ -296,7 +672,7 @@ func (a *CombatDMAgent) refreshTurnState(ctx context.Context) {
 			ActorName: currentTurn.ActorName,
 		}
 		a.cachedActions = nil
-		return
+		return err
 	}
 
 	a.turnState = &turnStateCache{
@@ -310,6 +686,7 @@ func (a *CombatDMAgent) refreshTurnState(ctx context.Context) {
 		zap.String("actor", actions.ActorName),
 		zap.String("type", actions.ActorType),
 	)
+	return nil
 }
 
 // isPlayerTurn 判断当前是否为玩家回合
@@ -514,4 +891,134 @@ func truncateStr(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+func hasProactiveActions(actions *dndengine.AvailableActionsResult) bool {
+	return len(proactiveActions(actions)) > 0
+}
+
+func proactiveActions(actions *dndengine.AvailableActionsResult) []dndengine.AvailableAction {
+	if actions == nil {
+		return nil
+	}
+	all := make([]dndengine.AvailableAction, 0, len(actions.Actions)+len(actions.BonusActions)+len(actions.FreeActions))
+	all = append(all, actions.Actions...)
+	all = append(all, actions.BonusActions...)
+	all = append(all, actions.FreeActions...)
+	return all
+}
+
+func findAvailableAction(actions *dndengine.AvailableActionsResult, actionID string) (dndengine.AvailableAction, bool) {
+	for _, action := range proactiveActions(actions) {
+		if action.ID == actionID {
+			return action, true
+		}
+	}
+	return dndengine.AvailableAction{}, false
+}
+
+func validateIntentTarget(intent ResolvedCombatIntent, action dndengine.AvailableAction) error {
+	if !action.RequiresTarget {
+		return nil
+	}
+	if intent.TargetID == "" && len(intent.TargetIDs) == 0 {
+		return fmt.Errorf("动作 %q 需要目标。", action.ID)
+	}
+	if intent.TargetID != "" && !idInList(intent.TargetID, action.ValidTargetIDs) {
+		return fmt.Errorf("目标 %q 不是动作 %q 的合法目标。", intent.TargetID, action.ID)
+	}
+	for _, id := range intent.TargetIDs {
+		if !idInList(id, action.ValidTargetIDs) {
+			return fmt.Errorf("目标 %q 不是动作 %q 的合法目标。", id, action.ID)
+		}
+	}
+	return nil
+}
+
+func firstValidTarget(action dndengine.AvailableAction) model.ID {
+	if len(action.ValidTargetIDs) == 0 {
+		return ""
+	}
+	return action.ValidTargetIDs[0]
+}
+
+func idInList(id model.ID, ids []model.ID) bool {
+	for _, candidate := range ids {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
+}
+
+func isPureEndTurnInput(input string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(input))
+	if normalized == "" {
+		return false
+	}
+	endPhrases := []string{"结束回合", "跳过", "待机", "pass", "end turn", "结束"}
+	actionHints := []string{"攻击", "施放", "释放", "使用", "冲刺", "撤离", "闪避", "协助", "躲藏", "搜索", "attack", "cast", "use"}
+	hasEnd := false
+	for _, phrase := range endPhrases {
+		if strings.Contains(normalized, phrase) {
+			hasEnd = true
+			break
+		}
+	}
+	if !hasEnd {
+		return false
+	}
+	for _, hint := range actionHints {
+		if strings.Contains(normalized, hint) {
+			return false
+		}
+	}
+	return true
+}
+
+func containsEndTurnHint(input string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(input))
+	for _, phrase := range []string{"结束回合", "跳过", "pass", "end turn"} {
+		if strings.Contains(normalized, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+func extractJSONObject(content string) string {
+	content = strings.TrimSpace(content)
+	if strings.HasPrefix(content, "{") && strings.HasSuffix(content, "}") {
+		return content
+	}
+	start := strings.Index(content, "{")
+	end := strings.LastIndex(content, "}")
+	if start >= 0 && end > start {
+		return content[start : end+1]
+	}
+	return content
+}
+
+func actionSummaries(actions *dndengine.AvailableActionsResult) []map[string]any {
+	summaries := make([]map[string]any, 0)
+	for _, action := range proactiveActions(actions) {
+		validTargets := make([]string, 0, len(action.ValidTargetIDs))
+		for _, id := range action.ValidTargetIDs {
+			validTargets = append(validTargets, string(id))
+		}
+		summaries = append(summaries, map[string]any{
+			"id":               action.ID,
+			"name":             action.Name,
+			"category":         action.Category,
+			"cost_type":        action.CostType,
+			"requires_target":  action.RequiresTarget,
+			"target_type":      action.TargetType,
+			"valid_target_ids": validTargets,
+			"range":            action.Range,
+			"damage_preview":   action.DamagePreview,
+			"resource_cost":    action.ResourceCost,
+			"description":      action.Description,
+		})
+	}
+	return summaries
 }

@@ -149,15 +149,17 @@
 - `end_long_rest` 已自动将游戏阶段切回 `exploration`，**无需额外调用 `set_phase`**。
 - 仅在特殊情况下（如 DM 判定需要强制切换阶段）才手动调用 `set_phase`。
 
-# 计划优先执行模式（Plan-Then-Act）
+# 显式计划工具模式（Plan-Then-Act）
 
-当玩家请求你处理**完整战斗回合**时，你应该使用**计划优先模式**：
+当玩家请求你处理**完整战斗回合**时，你必须使用 `submit_combat_plan` 工具提交显式战斗计划：
 
-1. **第一步：生成完整战术计划** - 分析当前战斗状态，为当前回合的所有需要行动的角色规划完整动作序列
-2. 系统会自动按顺序执行计划中的每个动作
-3. 如果所有动作执行成功，直接返回战斗结果总结
+1. **第一步：调用 `submit_combat_plan`** - 分析当前战斗状态，为当前回合的所有需要行动的角色规划完整动作序列，并把计划作为工具参数提交
+2. 系统会按顺序执行计划中的每个动作
+3. 工具返回执行结果后，你再基于结果生成战斗叙事总结
 
-计划必须使用 JSON 格式输出，示例：
+**禁止**把计划写在普通文本、Markdown 代码块或自然语言说明里。完整回合计划必须通过 `submit_combat_plan` 的 tool call 参数提交。
+
+`submit_combat_plan` 参数示例：
 
 ```json
 {
@@ -165,12 +167,12 @@
   "actions": [
     {
       "tool": "combat_attack",
-      "params": {"attacker_id": "actor_xxx", "target_id": "actor_yyy", "weapon_id": "weapon_xxx"},
+      "params": {"game_id": "{{.GameID}}", "attacker_id": "actor_xxx", "target_name": "哥布林", "weapon_name": "长剑", "attack_type": "melee"},
       "reason": "哥布林血量最低，优先击杀"
     },
     {
       "tool": "cast_spell",
-      "params": {"caster_id": "actor_xxx", "spell_name": "fireball", "targets": ["actor_yyy", "actor_zzz"]},
+      "params": {"game_id": "{{.GameID}}", "caster_id": "actor_xxx", "spell_id": "fireball", "target_ids": ["actor_yyy", "actor_zzz"], "slot_level": 3},
       "reason": "清理剩余敌人"
     }
   ],

@@ -47,7 +47,7 @@ func (a *CombatAgent) ToolsForTask(task string) []tool.Tool {
 	// 复合工具总是优先保留
 	for _, t := range allTools {
 		switch t.Name() {
-		case "combat_attack", "combat_start", "combat_heal", "combat_death_save", "show_combat_status", "query_spells":
+		case "combat_attack", "combat_start", "combat_heal", "combat_death_save", "submit_combat_plan", "show_combat_status", "query_spells":
 			result = append(result, t)
 		}
 	}

@@ -196,6 +196,7 @@ func registerAgentTools(registry *tool.ToolRegistry, engine *engine.Engine) {
 	registry.Register(tool.NewCombatStartTool(engine, registry), []string{agent.SubAgentNameCombat}, "composite_combat")
 	registry.Register(tool.NewCombatHealTool(engine, registry), []string{agent.SubAgentNameCombat}, "composite_combat")
 	registry.Register(tool.NewCombatDeathSaveTool(engine, registry), []string{agent.SubAgentNameCombat}, "composite_combat")
+	registry.Register(tool.NewSubmitCombatPlanTool(registry, agent.SubAgentNameCombat), []string{agent.SubAgentNameCombat}, "composite_combat")
 	// 只读 - MainAgent + SubAgent
 	registry.Register(tool.NewShowCombatStatusTool(engine, registry), []string{agent.SubAgentNameCombat, agent.MainAgentName}, "composite_combat")
 

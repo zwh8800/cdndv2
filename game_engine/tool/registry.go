@@ -386,9 +386,16 @@ func (r *ToolRegistry) executeTool(ctx context.Context, call llm.ToolCall) llm.T
 	}
 
 	if !toolResult.Success {
+		content := "Error: " + toolResult.Error
+		if toolResult.Data != nil {
+			dataJSON, _ := json.Marshal(toolResult.Data)
+			if len(dataJSON) > 0 && string(dataJSON) != "null" {
+				content += "\n" + string(dataJSON)
+			}
+		}
 		return llm.ToolResult{
 			ToolCallID: call.ID,
-			Content:    "Error: " + toolResult.Error,
+			Content:    content,
 			IsError:    true,
 		}
 	}

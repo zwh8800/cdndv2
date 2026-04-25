@@ -790,23 +790,8 @@ func (l *ReActLoop) executeDelegationsParallel(ctx context.Context, calls []agen
 // subAgentMaxIterations 子Agent内部循环最大迭代次数
 const subAgentMaxIterations = 5
 
-// CombatPlan 战斗计划（Plan-Then-Act 模式）
-type CombatPlan struct {
-	PlanType    string             `json:"plan_type"` // full_round, partial, single_action
-	Actions     []CombatPlanAction `json:"actions"`
-	Contingency string             `json:"contingency,omitempty"`
-}
-
-// CombatPlanAction 战斗计划中的单个动作
-type CombatPlanAction struct {
-	Tool   string         `json:"tool"`
-	Params map[string]any `json:"params"`
-	Reason string         `json:"reason,omitempty"`
-}
-
 // executeSingleDelegation 执行单个委托任务
 // 内部实现迷你ReAct循环：子Agent可能多次调用工具，直到生成最终文本响应
-// 对于CombatAgent支持Plan-Then-Act：先生成完整计划，再自动依次执行
 func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubAgentCall) *agent.AgentCallResult {
 	log := l.getLogger()
 
@@ -843,90 +828,6 @@ func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubA
 				AgentName: call.AgentName,
 				Success:   false,
 				Error:     "子Agent执行失败: " + err.Error(),
-			}
-		}
-
-		// 如果没有Tool调用，检查是否是Plan-Then-Act战斗计划
-		if len(resp.ToolCalls) == 0 && call.AgentName == agent.SubAgentNameCombat {
-			// 尝试解析为战斗计划
-			jsonContent := extractJSONFromString(resp.Content)
-			if jsonContent != "" {
-				var plan CombatPlan
-				if err := json.Unmarshal([]byte(jsonContent), &plan); err == nil && len(plan.Actions) > 0 {
-					log.Debug("Combat plan detected, executing Plan-Then-Act",
-						zap.Int("actionCount", len(plan.Actions)),
-						zap.String("planType", plan.PlanType),
-					)
-
-					// 按顺序执行计划中的每个动作
-					executionResults := make([]string, 0)
-					allSucceeded := true
-
-					for i, action := range plan.Actions {
-						log.Debug("Executing planned action",
-							zap.Int("index", i),
-							zap.String("tool", action.Tool),
-						)
-
-						// 创建tool call
-						tc := llm.ToolCall{
-							Name:      action.Tool,
-							Arguments: action.Params,
-							ID:        fmt.Sprintf("plan_%d_%s", i, action.Tool),
-						}
-
-						// 解析名称为ID并执行
-						toolCalls := []llm.ToolCall{tc}
-						l.resolveToolNames(ctx, toolCalls)
-						tc = toolCalls[0]
-						results := l.tools.ExecuteToolsForAgent(ctx, call.AgentName, toolCalls)
-
-						// 添加到子会话历史
-						subCtx.History = append(subCtx.History, llm.NewAssistantMessage("", []llm.ToolCall{tc}))
-						for _, tr := range results {
-							subCtx.History = append(subCtx.History, llm.NewToolMessage(tr.Content, tr.ToolCallID))
-							executionResults = append(executionResults, fmt.Sprintf("[%s] %s", action.Tool, tr.Content))
-							if tr.IsError {
-								allSucceeded = false
-								executionResults = append(executionResults, fmt.Sprintf("[%s] 错误: %s", action.Tool, tr.Content))
-							}
-						}
-					}
-
-					// 构建执行结果总结
-					var summary string
-					if allSucceeded {
-						summary = fmt.Sprintf("战斗计划执行完成 (%d 个动作全部成功)。\n\n", len(plan.Actions))
-					} else {
-						summary = fmt.Sprintf("战斗计划执行完成（部分动作失败）。\n\n")
-					}
-					if plan.Contingency != "" {
-						summary += fmt.Sprintf("应急计划: %s\n\n", plan.Contingency)
-					}
-					summary += "执行结果:\n" + strings.Join(executionResults, "\n")
-
-					log.Debug("Combat plan execution completed",
-						zap.Bool("allSucceeded", allSucceeded),
-					)
-
-					return &agent.AgentCallResult{
-						AgentName: call.AgentName,
-						Success:   true,
-						Content:   summary,
-					}
-				}
-			}
-
-			// 不是计划，就是普通的最终响应
-			log.Debug("SubAgent completed with final response",
-				zap.String("agentName", call.AgentName),
-				zap.Int("iterations", iteration+1),
-				zap.String("content", truncateString(resp.Content, 200)),
-			)
-			return &agent.AgentCallResult{
-				AgentName: call.AgentName,
-				Success:   true,
-				Content:   resp.Content,
 			}
 		}
 
@@ -974,19 +875,21 @@ func (l *ReActLoop) executeSingleDelegation(ctx context.Context, call agent.SubA
 		zap.Int("maxIterations", subAgentMaxIterations),
 	)
 
-	// 从子会话历史中提取最后一次的内容作为结果
-	var lastContent string
+	var lastToolContent string
 	for i := len(subCtx.History) - 1; i >= 0; i-- {
-		if subCtx.History[i].Role == llm.RoleAssistant && subCtx.History[i].Content != "" {
-			lastContent = subCtx.History[i].Content
+		if subCtx.History[i].Role == llm.RoleTool && subCtx.History[i].Content != "" {
+			lastToolContent = subCtx.History[i].Content
 			break
 		}
+	}
+	if lastToolContent != "" {
+		lastToolContent = ": " + truncateString(lastToolContent, 300)
 	}
 
 	return &agent.AgentCallResult{
 		AgentName: call.AgentName,
-		Success:   true,
-		Content:   lastContent,
+		Success:   false,
+		Error:     fmt.Sprintf("子Agent达到最大迭代次数(%d)，未生成最终响应%s", subAgentMaxIterations, lastToolContent),
 	}
 }
 
@@ -1330,6 +1233,11 @@ func (l *ReActLoop) resolveSingleCallNames(ctx context.Context, call *llm.ToolCa
 		return
 	}
 
+	if call.Name == "submit_combat_plan" {
+		l.resolveCombatPlanActionNames(ctx, call.Arguments)
+		return
+	}
+
 	// 解析 actor_id
 	if val, ok := call.Arguments["actor_id"].(string); ok && val != "" {
 		if resolved := l.resolveActorName(ctx, val); resolved != "" {
@@ -1359,6 +1267,43 @@ func (l *ReActLoop) resolveSingleCallNames(ctx context.Context, call *llm.ToolCa
 		if resolved := l.resolveSceneName(ctx, val, shouldFallbackToCurrentScene(call.Name)); resolved != "" {
 			call.Arguments["scene_id"] = resolved
 		}
+	}
+}
+
+func (l *ReActLoop) resolveCombatPlanActionNames(ctx context.Context, args map[string]any) {
+	rawActions, ok := args["actions"]
+	if !ok {
+		return
+	}
+
+	actions, ok := rawActions.([]any)
+	if !ok {
+		normalized, err := json.Marshal(rawActions)
+		if err != nil {
+			return
+		}
+		if err := json.Unmarshal(normalized, &actions); err != nil {
+			return
+		}
+		args["actions"] = actions
+	}
+
+	for _, rawAction := range actions {
+		action, ok := rawAction.(map[string]any)
+		if !ok {
+			continue
+		}
+		toolName, _ := action["tool"].(string)
+		params, ok := action["params"].(map[string]any)
+		if !ok {
+			continue
+		}
+		nested := llm.ToolCall{
+			Name:      toolName,
+			Arguments: params,
+		}
+		l.resolveSingleCallNames(ctx, &nested)
+		action["params"] = nested.Arguments
 	}
 }
 
